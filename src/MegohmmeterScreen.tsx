@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MegohmmeterState } from './types';
 import EnvironmentalData from './EnvironmentalData';
 import Chart from './Chart';
@@ -9,6 +9,151 @@ interface MegohmmeterScreenProps {
   onComplete: (data: any) => void;
   onBack: () => void;
 }
+
+// Componente de Knob Rotativo Interativo
+interface KnobProps {
+  value: number;
+  options: { value: number | string; label: string; angle: number }[];
+  onChange: (value: number | string) => void;
+  size?: number;
+  disabled?: boolean;
+  label?: string;
+}
+
+const RotaryKnob: React.FC<KnobProps> = ({ value, options, onChange, size = 80, disabled = false, label }) => {
+  const knobRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [startAngle, setStartAngle] = useState(0);
+
+  const currentOption = options.find(o => o.value === value) || options[0];
+  const currentAngle = currentOption?.angle || 0;
+
+  const getAngleFromEvent = useCallback((e: MouseEvent | React.MouseEvent) => {
+    if (!knobRef.current) return 0;
+    const rect = knobRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const x = e.clientX - centerX;
+    const y = e.clientY - centerY;
+    return Math.atan2(y, x) * (180 / Math.PI) + 90;
+  }, []);
+
+  const findClosestOption = useCallback((angle: number) => {
+    let normalizedAngle = angle % 360;
+    if (normalizedAngle < 0) normalizedAngle += 360;
+    
+    let closest = options[0];
+    let minDiff = Math.abs(normalizedAngle - options[0].angle);
+    
+    options.forEach(opt => {
+      const diff = Math.abs(normalizedAngle - opt.angle);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = opt;
+      }
+    });
+    
+    return closest;
+  }, [options]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (disabled) return;
+    e.preventDefault();
+    setIsDragging(true);
+    setStartAngle(getAngleFromEvent(e));
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging || disabled) return;
+      const angle = getAngleFromEvent(e);
+      const closest = findClosestOption(angle);
+      if (closest.value !== value) {
+        onChange(closest.value);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, disabled, getAngleFromEvent, findClosestOption, value, onChange]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '5px' }}>
+      {label && <div style={{ color: '#fff', fontSize: '10px', fontWeight: 'bold', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>{label}</div>}
+      <div
+        ref={knobRef}
+        onMouseDown={handleMouseDown}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: '50%',
+          background: 'linear-gradient(145deg, #3a3a3a, #1a1a1a)',
+          boxShadow: isDragging 
+            ? '0 0 15px rgba(255,215,0,0.5), inset 0 2px 5px rgba(0,0,0,0.5)'
+            : '0 4px 8px rgba(0,0,0,0.5), inset 0 2px 5px rgba(0,0,0,0.3)',
+          cursor: disabled ? 'not-allowed' : 'grab',
+          position: 'relative',
+          border: '3px solid #555',
+          transition: 'box-shadow 0.2s',
+          opacity: disabled ? 0.6 : 1
+        }}
+      >
+        {/* Indicador do knob */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            width: '4px',
+            height: size / 2 - 8,
+            background: 'linear-gradient(to bottom, #ffd700, #ff8c00)',
+            borderRadius: '2px',
+            transformOrigin: 'bottom center',
+            transform: `translate(-50%, -100%) rotate(${currentAngle}deg)`,
+            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+            boxShadow: '0 0 5px rgba(255,215,0,0.5)'
+          }}
+        />
+        {/* Centro do knob */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: size / 4,
+            height: size / 4,
+            borderRadius: '50%',
+            background: 'linear-gradient(145deg, #555, #333)',
+            border: '2px solid #666'
+          }}
+        />
+      </div>
+      <div style={{ 
+        color: '#ffd700', 
+        fontSize: '11px', 
+        fontWeight: 'bold',
+        textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+        background: 'rgba(0,0,0,0.6)',
+        padding: '2px 8px',
+        borderRadius: '4px'
+      }}>
+        {currentOption?.label || value}
+      </div>
+    </div>
+  );
+};
 
 const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBack }) => {
   const IP_DURATION = 600;
@@ -279,249 +424,312 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
               label: 'Medição',
               icon: '📊',
               content: (
-                <div>
-                  {/* Seção de Conexão */}
-        <div className="connection-section" style={{
-          background: 'rgba(255, 255, 255, 0.1)',
-          borderRadius: '15px',
-          padding: '20px',
-          margin: '20px 0',
-          border: '2px solid rgba(255, 215, 0, 0.3)'
-        }}>
-          <h3 style={{ color: '#ffd700', marginBottom: '15px', textAlign: 'center' }}>
-            🔌 Como Conectar ao Gerador
-          </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  
+                  {/* Painel do Megger com imagem de fundo */}
+                  <div style={{
+                    position: 'relative',
+                    width: '100%',
+                    maxWidth: '700px',
+                    margin: '0 auto',
+                    borderRadius: '12px',
+                    overflow: 'hidden',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+                  }}>
+                    {/* Imagem do Megger como fundo */}
+                    <img 
+                      src="/Tela Megger.png" 
+                      alt="Megger MIT515" 
+                      style={{
+                        width: '100%',
+                        height: 'auto',
+                        display: 'block'
+                      }}
+                    />
+                    
+                    {/* Overlay com controles */}
+                    <div style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      padding: '15px'
+                    }}>
+                      
+                      {/* Display Digital no topo */}
+                      <div style={{
+                        position: 'absolute',
+                        top: '8%',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        background: 'rgba(0,20,0,0.95)',
+                        border: '3px solid #333',
+                        borderRadius: '8px',
+                        padding: '10px 20px',
+                        minWidth: '280px',
+                        boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.8)'
+                      }}>
+                        <div style={{ 
+                          display: 'grid', 
+                          gridTemplateColumns: '1fr 1fr', 
+                          gap: '8px',
+                          fontFamily: "'Courier New', monospace"
+                        }}>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>RESISTÊNCIA</div>
+                            <div style={{ color: '#00ff00', fontSize: '24px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
+                              {state.resistance.toFixed(0)} <span style={{fontSize: '12px'}}>MΩ</span>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>TENSÃO</div>
+                            <div style={{ color: '#00ff00', fontSize: '24px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
+                              {state.appliedVoltage.toFixed(0)} <span style={{fontSize: '12px'}}>V</span>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>CORRENTE</div>
+                            <div style={{ color: '#00ff00', fontSize: '16px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
+                              {state.current.toFixed(3)} <span style={{fontSize: '10px'}}>μA</span>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'center' }}>
+                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>TEMPO</div>
+                            <div style={{ color: '#00ff00', fontSize: '16px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
+                              {formatTime(state.time)}
+                            </div>
+                          </div>
+                        </div>
+                        {state.testMode === 'IP' && (
+                          <div style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: '1fr 1fr', 
+                            gap: '8px',
+                            marginTop: '8px',
+                            paddingTop: '8px',
+                            borderTop: '1px solid #00ff0033'
+                          }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#ffd700', fontSize: '10px' }}>IA</div>
+                              <div style={{ color: '#ffd700', fontSize: '14px', fontWeight: 'bold' }}>
+                                {state.absorptionIndex ? state.absorptionIndex.toFixed(2) : '--'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#ffd700', fontSize: '10px' }}>IP</div>
+                              <div style={{ color: '#ffd700', fontSize: '14px', fontWeight: 'bold' }}>
+                                {state.polarizationIndex ? state.polarizationIndex.toFixed(2) : '--'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '20px' }}>
-            {/* Diagrama Visual */}
-            <div style={{ flex: '1', textAlign: 'center' }}>
-              <div style={{
-                background: 'rgba(0,0,0,0.8)',
-                borderRadius: '10px',
-                padding: '15px',
-                marginBottom: '10px',
-                fontFamily: 'monospace',
-                fontSize: '14px',
-                color: '#00ff00'
-              }}>
-                <div>🏭 GERADOR WEG</div>
-                <div style={{ margin: '10px 0' }}>
-                  <div>┌─────────────┐</div>
-                  <div>│ TERMINAL R  │ ← 🟢 TESTE</div>
-                  <div>│ TERMINAL S  │</div>
-                  <div>│ TERMINAL T  │</div>
-                  <div>│ TERRA (GND) │ ← 🟡 TERRA</div>
-                  <div>└─────────────┘</div>
-                </div>
-                <div>⚡ 13.2 kV</div>
-              </div>
+                      {/* Knobs na parte inferior */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: '8%',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        display: 'flex',
+                        gap: '60px',
+                        alignItems: 'flex-end'
+                      }}>
+                        {/* Knob de Modo de Teste */}
+                        <RotaryKnob
+                          label="MODO DE TESTE"
+                          value={state.testMode}
+                          options={[
+                            { value: 'IP', label: 'IP', angle: -45 },
+                            { value: 'DD', label: 'DD', angle: 0 },
+                            { value: 'SV', label: 'SV', angle: 45 }
+                          ]}
+                          onChange={(v) => setState(prev => ({ ...prev, testMode: v as string }))}
+                          size={70}
+                          disabled={state.isRunning}
+                        />
 
-              <div style={{
-                background: 'rgba(0,0,0,0.8)',
-                borderRadius: '10px',
-                padding: '15px',
-                marginTop: '10px'
-              }}>
-                <div style={{ color: '#ffd700', fontSize: '16px', marginBottom: '10px' }}>📊 MEGÔMETRO MIT515</div>
-                <div>┌─────────────────┐</div>
-                <div>│ ⚡ TEST (VERMELHO) │</div>
-                <div>│ ⚡ GUARD (AZUL)   │</div>
-                <div>│ ⚡ GROUND (VERDE) │</div>
-                <div>└─────────────────┘</div>
-              </div>
-            </div>
+                        {/* Botão de Teste (START/STOP) */}
+                        <div 
+                          onClick={state.isRunning ? stopTest : startTest}
+                          style={{
+                            width: '90px',
+                            height: '90px',
+                            borderRadius: '50%',
+                            background: state.isRunning 
+                              ? 'linear-gradient(145deg, #ff4444, #cc0000)'
+                              : 'linear-gradient(145deg, #44ff44, #00cc00)',
+                            border: '4px solid #333',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            boxShadow: state.isRunning
+                              ? '0 0 20px rgba(255,0,0,0.5), inset 0 -3px 10px rgba(0,0,0,0.3)'
+                              : '0 0 20px rgba(0,255,0,0.5), inset 0 -3px 10px rgba(0,0,0,0.3)',
+                            transition: 'all 0.2s',
+                            flexDirection: 'column'
+                          }}
+                        >
+                          <span style={{ 
+                            color: '#fff', 
+                            fontWeight: 'bold', 
+                            fontSize: '14px',
+                            textShadow: '0 1px 3px rgba(0,0,0,0.5)'
+                          }}>
+                            {state.isRunning ? 'STOP' : 'TEST'}
+                          </span>
+                          <span style={{ fontSize: '20px' }}>
+                            {state.isRunning ? '⏹' : '▶'}
+                          </span>
+                        </div>
 
-            {/* Instruções de Conexão */}
-            <div style={{ flex: '1', color: 'white' }}>
-              <h4 style={{ color: '#ffd700', marginBottom: '10px' }}>📋 Passos de Conexão:</h4>
-              <ol style={{ lineHeight: '1.6', fontSize: '14px' }}>
-                <li><strong>1.</strong> Desenergize completamente o gerador</li>
-                <li><strong>2.</strong> Identifique os terminais R, S, T do enrolamento</li>
-                <li><strong>3.</strong> Conecte o cabo <span style={{color: '#ff6b6b'}}>VERMELHO (TESTE)</span> ao terminal do enrolamento a testar</li>
-                <li><strong>4.</strong> Conecte o cabo <span style={{color: '#4ecdc4'}}>AZUL (GUARD)</span> ao terminal adjacente (proteção)</li>
-                <li><strong>5.</strong> Conecte o cabo <span style={{color: '#45b7d1'}}>VERDE (TERRA)</span> ao terra do gerador</li>
-                <li><strong>6.</strong> Verifique isolamento dos cabos antes de energizar</li>
-                <li><strong>7.</strong> Mantenha distância segura durante o teste</li>
-              </ol>
+                        {/* Knob de Tensão */}
+                        <RotaryKnob
+                          label="TENSÃO (V)"
+                          value={state.testVoltage}
+                          options={[
+                            { value: 500, label: '500V', angle: -135 },
+                            { value: 1000, label: '1kV', angle: -108 },
+                            { value: 1500, label: '1.5kV', angle: -81 },
+                            { value: 2000, label: '2kV', angle: -54 },
+                            { value: 2500, label: '2.5kV', angle: -27 },
+                            { value: 3000, label: '3kV', angle: 0 },
+                            { value: 4000, label: '4kV', angle: 27 },
+                            { value: 5000, label: '5kV', angle: 54 },
+                            { value: 7500, label: '7.5kV', angle: 81 },
+                            { value: 10000, label: '10kV', angle: 108 }
+                          ]}
+                          onChange={(v) => setState(prev => ({ ...prev, testVoltage: v as number }))}
+                          size={70}
+                          disabled={state.isRunning}
+                        />
+                      </div>
 
-              <div style={{
-                background: 'rgba(255, 193, 7, 0.2)',
-                border: '1px solid #ffc107',
-                borderRadius: '8px',
-                padding: '10px',
-                marginTop: '15px',
-                fontSize: '12px'
-              }}>
-                <strong>⚠️ ATENÇÃO:</strong> Alto tensão! Certifique-se de que todos os procedimentos de segurança sejam seguidos.
-              </div>
-            </div>
-          </div>
-        </div>
+                      {/* Indicador de Status */}
+                      <div style={{
+                        position: 'absolute',
+                        top: '40%',
+                        right: '5%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
+                      }}>
+                        <div style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          background: state.isRunning ? '#00ff00' : '#333',
+                          boxShadow: state.isRunning ? '0 0 15px #00ff00' : 'none',
+                          border: '2px solid #555'
+                        }} title="Em Operação" />
+                        <div style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          background: state.appliedVoltage > 0 ? '#ff0000' : '#333',
+                          boxShadow: state.appliedVoltage > 0 ? '0 0 15px #ff0000' : 'none',
+                          border: '2px solid #555'
+                        }} title="Alta Tensão" />
+                      </div>
+                    </div>
+                  </div>
 
-        <div className="controls-section">
-          <h3>Configurações</h3>
-          <div className="control-group">
-            <label>Modo de Teste:</label>
-            <select
-              value={state.testMode}
-              onChange={(e) => setState(prev => ({ ...prev, testMode: e.target.value }))}
-              disabled={state.isRunning}
-            >
-              <option value="IP">IP (Índice de Polarização)</option>
-              <option value="DD">DD (Razão de Absorção Dielétrica)</option>
-              <option value="SV">SV (Step Voltage)</option>
-            </select>
-          </div>
+                  {/* Gráficos */}
+                  <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                    {state.testMode === 'SV' && svChartData.length > 0 && (
+                      <Chart
+                        data={svChartData}
+                        labels={svChartLabels}
+                        title="Resistência vs Tensão (Step Voltage)"
+                        yAxisLabel="Resistência (MΩ)"
+                        color="#ffd700"
+                        type="bar"
+                        width={450}
+                        height={200}
+                      />
+                    )}
 
-          <div className="control-group">
-            <label>Tensão de Teste:</label>
-            <select
-              value={state.testVoltage}
-              onChange={(e) => setState(prev => ({ ...prev, testVoltage: parseInt(e.target.value) }))}
-              disabled={state.isRunning}
-            >
-              {voltageSteps.map(voltage => (
-                <option key={voltage} value={voltage}>{voltage} V</option>
-              ))}
-            </select>
-          </div>
-        </div>
+                    {state.testMode === 'DD' && chartData.length > 0 && (
+                      <Chart
+                        data={chartData}
+                        labels={chartLabels}
+                        title="Corrente de Descarga vs Tempo"
+                        yAxisLabel="Corrente (μA)"
+                        color="#ff6b6b"
+                        type="line"
+                        width={450}
+                        height={200}
+                      />
+                    )}
 
-        <div className="display-section">
-          <h3>Leituras</h3>
-          <div className="displays">
-            <div className="display">
-              <div className="display-label">Tensão Aplicada</div>
-              <div className="display-value">{state.appliedVoltage.toFixed(0)} V</div>
-            </div>
-            <div className="display">
-              <div className="display-label">Resistência</div>
-              <div className="display-value">{state.resistance.toFixed(0)} MΩ</div>
-            </div>
-            <div className="display">
-              <div className="display-label">Corrente</div>
-              <div className="display-value">{state.current.toFixed(3)} μA</div>
-            </div>
-            <div className="display">
-              <div className="display-label">Constante Tempo</div>
-              <div className="display-value">{state.timeConstant.toFixed(1)} s</div>
-            </div>
-            <div className="display">
-              <div className="display-label">Capacitância CC</div>
-              <div className="display-value">{state.capacitanceCC.toFixed(1)} nF</div>
-            </div>
-            {state.testMode === 'IP' && (
-              <>
-                <div className="display">
-                  <div className="display-label">Índice de Absorção (IA)</div>
-                  <div className="display-value">{state.absorptionIndex ? state.absorptionIndex.toFixed(2) : '--'}</div>
-                </div>
-                <div className="display">
-                  <div className="display-label">Índice de Polarização (IP)</div>
-                  <div className="display-value">{state.polarizationIndex ? state.polarizationIndex.toFixed(2) : '--'}</div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+                    {state.testMode === 'IP' && chartData.length > 0 && (
+                      <Chart
+                        data={chartData}
+                        labels={chartLabels}
+                        title="Resistência de Isolamento vs Tempo"
+                        yAxisLabel="Resistência (MΩ)"
+                        color="#00ff00"
+                        type="line"
+                        width={450}
+                        height={200}
+                      />
+                    )}
+                  </div>
 
-        {state.testMode === 'SV' && svChartData.length > 0 && (
-          <Chart
-            data={svChartData}
-            labels={svChartLabels}
-            title="Resistência vs Tensão (Step Voltage)"
-            yAxisLabel="Resistência (MΩ)"
-            color="#ffd700"
-            type="bar"
-            width={500}
-            height={250}
-          />
-        )}
+                  {/* Tabela de Medições */}
+                  {state.measurements.length > 0 && (
+                    <div style={{ 
+                      background: 'rgba(0,0,0,0.3)', 
+                      borderRadius: '8px', 
+                      padding: '15px',
+                      border: '1px solid rgba(255,215,0,0.3)'
+                    }}>
+                      <h3 style={{ color: '#ffd700', marginTop: 0 }}>📋 Medições Realizadas</h3>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'rgba(255,215,0,0.2)' }}>
+                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #ffd700' }}>Teste</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #ffd700' }}>Modo</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #ffd700' }}>Tensão</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #ffd700' }}>Resistência</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #ffd700' }}>τ (s)</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #ffd700' }}>IA</th>
+                            <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #ffd700' }}>IP</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {state.measurements.map((measurement, index) => (
+                            <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                              <td style={{ padding: '8px' }}>#{index + 1}</td>
+                              <td style={{ padding: '8px', color: '#ffd700' }}>{measurement.mode}</td>
+                              <td style={{ padding: '8px' }}>{measurement.voltage} V</td>
+                              <td style={{ padding: '8px', color: '#00ff00' }}>{measurement.resistance.toFixed(0)} MΩ</td>
+                              <td style={{ padding: '8px' }}>{measurement.timeConstant.toFixed(1)}</td>
+                              <td style={{ padding: '8px' }}>{measurement.absorptionIndex ? measurement.absorptionIndex.toFixed(2) : '-'}</td>
+                              <td style={{ padding: '8px' }}>{measurement.polarizationIndex ? measurement.polarizationIndex.toFixed(2) : '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
-        {state.testMode === 'DD' && chartData.length > 0 && (
-          <Chart
-            data={chartData}
-            labels={chartLabels}
-            title="Corrente de Descarga vs Tempo"
-            yAxisLabel="Corrente (μA)"
-            color="#ff6b6b"
-            type="line"
-            width={500}
-            height={250}
-          />
-        )}
-
-        {state.testMode === 'IP' && chartData.length > 0 && (
-          <Chart
-            data={chartData}
-            labels={chartLabels}
-            title="Resistência de Isolamento vs Tempo"
-            yAxisLabel="Resistência (MΩ)"
-            color="#00ff00"
-            type="line"
-            width={500}
-            height={250}
-          />
-        )}
-
-        <div className="timer">
-          <h3>Tempo: {formatTime(state.time)}</h3>
-        </div>
-
-        <div className="controls">
-          {!state.isRunning ? (
-            <button className="btn btn-primary" onClick={startTest}>
-              Iniciar Teste
-            </button>
-          ) : (
-            <button className="btn btn-danger" onClick={stopTest}>
-              Parar Teste
-            </button>
-          )}
-        </div>
-
-        {state.measurements.length > 0 && (
-          <div className="measurements-section">
-            <h3>Medições Realizadas</h3>
-            <table className="measurements-table">
-              <thead>
-                <tr>
-                  <th>Teste</th>
-                  <th>Modo</th>
-                  <th>Tensão (V)</th>
-                  <th>Resistência (MΩ)</th>
-                  <th>Constante Tempo (s)</th>
-                  <th>IA</th>
-                  <th>IP</th>
-                </tr>
-              </thead>
-              <tbody>
-                {state.measurements.map((measurement, index) => (
-                  <tr key={index}>
-                    <td>Teste {index + 1}</td>
-                    <td>{measurement.mode}</td>
-                    <td>{measurement.voltage}</td>
-                    <td>{measurement.resistance.toFixed(0)}</td>
-                    <td>{measurement.timeConstant.toFixed(1)}</td>
-                    <td>{measurement.absorptionIndex ? measurement.absorptionIndex.toFixed(2) : '-'}</td>
-                    <td>{measurement.polarizationIndex ? measurement.polarizationIndex.toFixed(2) : '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="action-buttons">
-          <button className="btn btn-secondary" onClick={onBack}>
-            Voltar ao Menu
-          </button>
-          {state.measurements.length > 0 && (
-            <button className="btn btn-success" onClick={sendToPlatform}>
-              Enviar para DAIMER
-            </button>
-          )}
-        </div>
+                  {/* Botões de Ação */}
+                  <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
+                    <button className="btn btn-secondary" onClick={onBack}>
+                      ← Voltar ao Menu
+                    </button>
+                    {state.measurements.length > 0 && (
+                      <button className="btn btn-success" onClick={sendToPlatform}>
+                        📤 Enviar para DAIMER
+                      </button>
+                    )}
+                  </div>
                 </div>
               )
             },
