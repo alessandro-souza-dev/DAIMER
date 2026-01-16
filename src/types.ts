@@ -28,15 +28,25 @@ export interface MegohmmeterState extends EquipmentState {
   testMode: string;
   testVoltage: number;
   appliedVoltage: number;
+  svScenario?: 'great' | 'good' | 'warning' | 'dangerous';
+  ipScenario?: 'poor' | 'questionable' | 'acceptable' | 'good';
   resistance: number;
   current: number;
   timeConstant: number;
   capacitanceCC: number;
   absorptionIndex?: number;
   polarizationIndex?: number;
+  daIndex?: number;
+  ddIndex?: number;
+  r15s?: number;
   r30s?: number;
   r60s?: number;
+  r180s?: number;
   r600s?: number;
+  sv1m?: number;
+  sv2m?: number;
+  sv3m?: number;
+  sv4m?: number;
   measurements: Array<{
     mode: string;
     voltage: number;

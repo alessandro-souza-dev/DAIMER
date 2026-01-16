@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MegohmmeterState } from './types';
 import EnvironmentalData from './EnvironmentalData';
 import Chart from './Chart';
+import DualAxisChart from './DualAxisChart';
 import TestInfo from './TestInfo';
 import TabComponent from './TabComponent';
 
@@ -12,7 +13,7 @@ interface MegohmmeterScreenProps {
 
 // Componente de Knob Rotativo Interativo
 interface KnobProps {
-  value: number;
+  value: number | string;
   options: { value: number | string; label: string; angle: number }[];
   onChange: (value: number | string) => void;
   size?: number;
@@ -23,7 +24,6 @@ interface KnobProps {
 const RotaryKnob: React.FC<KnobProps> = ({ value, options, onChange, size = 80, disabled = false, label }) => {
   const knobRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [startAngle, setStartAngle] = useState(0);
 
   const currentOption = options.find(o => o.value === value) || options[0];
   const currentAngle = currentOption?.angle || 0;
@@ -59,8 +59,28 @@ const RotaryKnob: React.FC<KnobProps> = ({ value, options, onChange, size = 80, 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (disabled) return;
     e.preventDefault();
+    e.stopPropagation();
     setIsDragging(true);
-    setStartAngle(getAngleFromEvent(e));
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (disabled || isDragging) return;
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Get angle from click
+    if (!knobRef.current) return;
+    const rect = knobRef.current.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const x = e.clientX - centerX;
+    const y = e.clientY - centerY;
+    const angle = Math.atan2(y, x) * (180 / Math.PI) + 90;
+    
+    const closest = findClosestOption(angle);
+    if (closest.value !== value) {
+      onChange(closest.value);
+    }
   };
 
   useEffect(() => {
@@ -94,6 +114,7 @@ const RotaryKnob: React.FC<KnobProps> = ({ value, options, onChange, size = 80, 
       <div
         ref={knobRef}
         onMouseDown={handleMouseDown}
+        onClick={handleClick}
         style={{
           width: size,
           height: size,
@@ -157,14 +178,21 @@ const RotaryKnob: React.FC<KnobProps> = ({ value, options, onChange, size = 80, 
 
 const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBack }) => {
   const IP_DURATION = 600;
-  const DD_CHARGE_DURATION = 1800;
-  const DD_DISCHARGE_DURATION = 120;
+  const DD_CHARGE_DURATION = 1800; // 30 minutos de carga
+  const DD_DISCHARGE_DURATION = 60; // 1 minuto de descarga
   const SV_STEP_DURATION = 60;
   const SV_STEPS_COUNT = 5;
 
-  const getTimeStep = (mode: string) => {
-    if (mode === 'DD') return 60;
-    if (mode === 'SV') return 20;
+  const getTimeStep = (mode: string, time?: number) => {
+    if (mode === 'DD') {
+      // Durante a fase de descarga (após 30 min), usar timeStep menor para mais pontos
+      if (time !== undefined && time >= DD_CHARGE_DURATION) {
+        return 1; // 1 segundo durante descarga para curva suave
+      }
+      return 5; // 5 segundos durante carga
+    }
+    if (mode === 'SV') return 5;
+    if (mode === 'IP') return 2; // Mais pontos para gráfico IP mais suave
     return 30;
   };
 
@@ -188,20 +216,26 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
     capacitanceCC: 0,
     absorptionIndex: undefined,
     polarizationIndex: undefined,
+    ddIndex: undefined,
     r30s: undefined,
     r60s: undefined,
     r600s: undefined,
+    sv1m: undefined,
+    sv2m: undefined,
+    sv3m: undefined,
+    sv4m: undefined,
     time: 0,
     measurements: []
   });
 
   const [chartData, setChartData] = useState<number[]>([]);
   const [chartLabels, setChartLabels] = useState<string[]>([]);
+  const [chartCurrentData, setChartCurrentData] = useState<number[]>([]);
+  const [ddChargeCurrent, setDdChargeCurrent] = useState<number[]>([]);
+  const [ddDischargeCurrent, setDdDischargeCurrent] = useState<number[]>([]);
   const [svChartData, setSvChartData] = useState<number[]>([]);
+  const [svChartCurrentData, setSvChartCurrentData] = useState<number[]>([]);
   const [svChartLabels, setSvChartLabels] = useState<string[]>([]);
-
-  // Steps de tensão de 500V em 500V
-  const voltageSteps = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 9500, 10000];
 
   useEffect(() => {
     let interval: any;
@@ -209,7 +243,7 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
     if (state.isRunning) {
       interval = setInterval(() => {
         setState(prev => {
-          const timeStep = getTimeStep(prev.testMode);
+          const timeStep = getTimeStep(prev.testMode, prev.time);
           const maxTime = getMaxTime(prev.testMode);
           const newTime = Math.min(prev.time + timeStep, maxTime);
 
@@ -221,22 +255,71 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
           let r30s = prev.r30s;
           let r60s = prev.r60s;
           let r600s = prev.r600s;
+          let sv1m = prev.sv1m;
+          let sv2m = prev.sv2m;
+          let sv3m = prev.sv3m;
+          let sv4m = prev.sv4m;
+          let r15s = (prev as any).r15s;
+          let r180s = (prev as any).r180s;
 
           if (prev.testMode === 'SV') {
             const steps = getSvSteps(prev.testVoltage);
-            const prevStepIndex = Math.min(Math.floor(prev.time / SV_STEP_DURATION), steps.length - 1);
             const stepIndex = Math.min(Math.floor(newTime / SV_STEP_DURATION), steps.length - 1);
 
             appliedVoltage = steps[stepIndex];
-            resistance = 1200 + stepIndex * 120 + Math.random() * 15;
-            current = (appliedVoltage / 1000) / resistance;
+            
+            // Simulação baseada no cenário
+            if (prev.svScenario === 'great') {
+                // Ótimo: Resistência aumenta com a tensão
+                // Base 1200 + aumento de ~10% a cada step
+                resistance = 1200 * (1 + (stepIndex * 0.1)) + Math.random() * 15;
+            } else if (prev.svScenario === 'good') {
+                // Bom: Resistência se mantém estável ou leve aumento
+                resistance = 1200 + stepIndex * 15 + Math.random() * 15;
+            } else if (prev.svScenario === 'warning') {
+                // Atenção: Queda de até 35% em algum step
+                // Vamos simular uma queda progressiva que atinge ~20-30% no último step
+                const dropFactor = stepIndex * 0.07; // 4 * 0.07 = 28% de queda no final
+                resistance = 1200 * (1 - dropFactor) + Math.random() * 10;
+            } else if (prev.svScenario === 'dangerous') {
+                // Perigoso: Queda acima de 35%
+                // Queda brusca a partir do 3º step ou progressiva forte
+                const dropFactor = stepIndex * 0.15; // 4 * 0.15 = 60% queda no final
+                resistance = 1200 * (1 - dropFactor) + Math.random() * 10;
+            } else {
+                 // Fallback sem cenário
+                 resistance = 1200 + stepIndex * 120 + Math.random() * 15;
+            }
+
+            // Garante que não fique negativo ou zero (casos extremos random)
+            resistance = Math.max(10, resistance);
+
+            current = appliedVoltage / resistance;
             capacitanceCC = 69 + (Math.random() - 0.5) * 3;
             timeConstant = (resistance * capacitanceCC) / 1000;
 
-            if (stepIndex !== prevStepIndex || prev.time === 0) {
-              setSvChartData(prevData => [...prevData, resistance]);
-              setSvChartLabels(prevLabels => [...prevLabels, `${appliedVoltage} V`]);
+            // Coletar dados APENAS ao final de cada step (mudança de tensão)
+            // Os pontos devem ser coletados em 1m, 2m, 3m, 4m, 5m
+            if (newTime > 0 && newTime % 60 === 0) {
+              // Pegamos os valores anteriores (do final do minuto) para registrar
+              // O step que acabou de terminar corresponde ao índice: (newTime/60) - 1
+              const recordedStepIndex = (newTime / 60) - 1;
+              const recordedVoltage = steps[recordedStepIndex];
+              
+              setSvChartData(prevData => [...prevData, prev.resistance]);
+              setSvChartCurrentData(prevData => [...prevData, prev.current]);
+              setSvChartLabels(prevLabels => [...prevLabels, `${recordedVoltage}`]);
             }
+            
+            // Adicionar label só quando entra em um novo step (Removido - agora labels são adicionados com os dados)
+
+            // Capturar leituras de fim de step (1m, 2m, 3m, 4m)
+            // Usamos prev.resistance pois representa o valor ao final do step anterior
+            if (prev.time < 60 && newTime >= 60) sv1m = prev.resistance;
+            if (prev.time < 120 && newTime >= 120) sv2m = prev.resistance;
+            if (prev.time < 180 && newTime >= 180) sv3m = prev.resistance;
+            if (prev.time < 240 && newTime >= 240) sv4m = prev.resistance;
+
           } else if (prev.testMode === 'DD') {
             const chargePhase = newTime <= DD_CHARGE_DURATION;
             const chargeTime = Math.min(newTime, DD_CHARGE_DURATION);
@@ -247,35 +330,143 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
             const baseResistance = 900 + Math.log(chargeTime / 60 + 1) * 900;
             resistance = baseResistance + (Math.random() - 0.5) * 10;
 
+            let chargeCurrent = 0;
+            let dischargeCurrent = 0;
+            
+            // Corrente máxima inicial de carga (para referência do pico de descarga)
+            const maxChargeCurrent = 7.0;
+            // Corrente final de carga (estabilizada)
+            const finalChargeCurrent = 0.3;
+
             if (chargePhase) {
-              current = 5 * Math.exp(-chargeTime / 300) + 0.3;
-            } else {
-              current = 5 * Math.exp(-dischargeTime / 15) + 0.1;
+              // Curva de carga com joelho mais acentuado (decaimento exponencial mais rápido no início)
+              // Usando constante de tempo menor (60s) para decaimento mais rápido
+              chargeCurrent = (maxChargeCurrent - finalChargeCurrent) * Math.exp(-chargeTime / 60) + finalChargeCurrent;
+              dischargeCurrent = 0;
+              current = chargeCurrent;
+              // Coletar pontos de carga (plota até 30 min)
+              setDdChargeCurrent(prevData => [...prevData, chargeCurrent]);
+              setDdDischargeCurrent(prevData => [...prevData, 0]);
+              setChartLabels(prevLabels => [...prevLabels, formatTime(newTime)]);
+              
+              // Se este é o último ponto da fase de carga (exatamente 30 min), 
+              // adiciona também o ponto inicial da descarga para continuidade visual
+              if (newTime === DD_CHARGE_DURATION) {
+                // Adiciona ponto de transição: carga termina e descarga começa no mesmo valor
+                setDdChargeCurrent(prevData => [...prevData, 0]);
+                setDdDischargeCurrent(prevData => [...prevData, -finalChargeCurrent]);
+                setChartLabels(prevLabels => [...prevLabels, formatTime(newTime)]);
+              }
+            } else if (dischargeTime <= DD_DISCHARGE_DURATION) {
+              // Fase de descarga: começa em 30 min
+              // Valor inicial da descarga = valor final da carga (negativo)
+              // Pico de descarga = ~1.3x a corrente máxima de carga (negativo)
+              const peakDischargeCurrent = -(maxChargeCurrent * 1.3);
+              // A descarga começa no valor final da carga (negativo) e vai até o pico rapidamente
+              // Depois decai de volta tentando ir a zero com curva suave (joelho)
+              const peakTime = 3; // tempo para atingir o pico (3 segundos) - descida rápida
+              const decayTime = 25; // constante de tempo maior para retorno suave
+              
+              if (dischargeTime <= peakTime) {
+                // Descida rápida do valor inicial até o pico (exponencial rápido)
+                const t = dischargeTime / peakTime;
+                // Usar curva exponencial para descida mais natural
+                const expFactor = 1 - Math.exp(-3 * t); // Curva exponencial rápida
+                dischargeCurrent = -finalChargeCurrent + (peakDischargeCurrent + finalChargeCurrent) * expFactor;
+              } else {
+                // Retorno suave do pico tentando ir a zero (joelho exponencial)
+                const timeAfterPeak = dischargeTime - peakTime;
+                dischargeCurrent = peakDischargeCurrent * Math.exp(-timeAfterPeak / decayTime);
+              }
+              
+              chargeCurrent = 0;
+              current = Math.abs(dischargeCurrent);
+              // Carga fica em 0 após 30 min, descarga começa a ser plotada
+              setDdChargeCurrent(prevData => [...prevData, 0]);
+              setDdDischargeCurrent(prevData => [...prevData, dischargeCurrent]);
+              setChartLabels(prevLabels => [...prevLabels, formatTime(newTime)]);
             }
 
             capacitanceCC = 69 + (Math.random() - 0.5) * 3;
             timeConstant = (resistance * capacitanceCC) / 1000;
-
-            setChartData(prevData => [...prevData, current]);
-            setChartLabels(prevLabels => [...prevLabels, formatTime(newTime)]);
+            
+            // Calcular DD em 31 min (1860 segundos) - 1 minuto após remoção da tensão
+            // DD = I1min / (V × C)
+            // I1min = corrente de descarga em mA, 1 minuto após remoção da tensão
+            // V = tensão de teste em Volts
+            // C = capacitância em Farads
+            const DD_CALC_TIME = 1860; // 31 minutos em segundos (30 min carga + 1 min descarga)
+            if (newTime >= DD_CALC_TIME && !prev.ddIndex) {
+              // Converter unidades:
+              // current está em μA -> converter para mA: dividir por 1000
+              // capacitanceCC está em nF -> converter para F: dividir por 10^9
+              // testVoltage está em V (já correto)
+              const currentMA = current / 1000; // μA para mA
+              const capacitanceF = capacitanceCC / 1e9; // nF para F
+              const ddValue = currentMA / (prev.testVoltage * capacitanceF);
+              return {
+                ...prev,
+                time: newTime,
+                appliedVoltage,
+                resistance,
+                current,
+                capacitanceCC,
+                timeConstant,
+                ddIndex: ddValue
+              };
+            }
           } else {
             const tMin = newTime / 60;
-            const baseResistance = 800;
-            const timeVariation = Math.log(tMin + 1) * 700;
-            resistance = baseResistance + timeVariation + (Math.random() - 0.5) * 8;
-            current = (prev.testVoltage / 1000) / resistance;
+            
+            // Simulação baseada no cenário IP
+            let targetPI = 3.0;
+            let k = 0.5; // inclinação da curva log
+
+            if (prev.ipScenario === 'poor') {
+                 // PI < 1
+                 // Resistência plana ou caindo
+                 targetPI = 0.9;
+                 k = Math.log10(targetPI); // negativo ou zero
+            } else if (prev.ipScenario === 'questionable') {
+                 // 1 <= PI <= 2
+                 targetPI = 1.5;
+                 k = Math.log10(targetPI); 
+            } else if (prev.ipScenario === 'acceptable') {
+                 // 2 <= PI <= 4
+                 targetPI = 3.0; // Padrão
+                 k = Math.log10(targetPI);
+            } else if (prev.ipScenario === 'good') {
+                 // PI > 4
+                 targetPI = 6.0;
+                 k = Math.log10(targetPI);
+            }
+
+            // R(t) = R1min * t^k (com t em minutos)
+            const r1minBase = 800 + Math.random() * 50; 
+            const safeTMin = Math.max(tMin, 1/60); // 1s min
+            
+            resistance = r1minBase * Math.pow(safeTMin, k) + (Math.random() - 0.5) * 5;
+
+            current = prev.testVoltage / resistance;
             capacitanceCC = 69 + (Math.random() - 0.5) * 3;
             timeConstant = (resistance * capacitanceCC) / 1000;
-
+            
+            if (!r15s && newTime >= 15) r15s = resistance;
             if (!r30s && newTime >= 30) r30s = resistance;
             if (!r60s && newTime >= 60) r60s = resistance;
+            if (!r180s && newTime >= 180) r180s = resistance;
             if (!r600s && newTime >= 600) r600s = resistance;
 
             setChartData(prevData => [...prevData, resistance]);
+            setChartCurrentData(prevData => [...prevData, current]);
             setChartLabels(prevLabels => [...prevLabels, formatTime(newTime)]);
           }
 
-          const absorptionIndex = r30s && r60s ? r60s / r30s : prev.absorptionIndex;
+          // DA = R3min / R30s
+          const daIndex = r180s && r30s ? r180s / r30s : (prev as any).daIndex;
+          // IA = R1min / R30s
+          const absorptionIndex = r60s && r30s ? r60s / r30s : prev.absorptionIndex;
+          // IP = R10min / R1min
           const polarizationIndex = r60s && r600s ? r600s / r60s : prev.polarizationIndex;
 
           const newState = {
@@ -286,11 +477,18 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
             current,
             timeConstant,
             capacitanceCC,
+            r15s,
             r30s,
             r60s,
+            r180s,
             r600s,
+            sv1m,
+            sv2m,
+            sv3m,
+            sv4m,
             absorptionIndex,
-            polarizationIndex
+            polarizationIndex,
+            daIndex
           };
 
           if (newTime >= maxTime) {
@@ -315,7 +513,7 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
 
           return newState;
         });
-      }, 1000);
+      }, 67);
     }
 
     return () => {
@@ -326,8 +524,20 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
   const startTest = () => {
     setChartData([]);
     setChartLabels([]);
+    setChartCurrentData([]);
+    setDdChargeCurrent([]);
+    setDdDischargeCurrent([]);
     setSvChartData([]);
+    setSvChartCurrentData([]);
     setSvChartLabels([]);
+
+    // Sortear cenário para SV
+    const svScenarios: ('great' | 'good' | 'warning' | 'dangerous')[] = ['great', 'good', 'warning', 'dangerous'];
+    const randomSvScenario = svScenarios[Math.floor(Math.random() * svScenarios.length)];
+    
+    // Sortear cenário para IP
+    const ipScenarios: ('poor' | 'questionable' | 'acceptable' | 'good')[] = ['poor', 'questionable', 'acceptable', 'good'];
+    const randomIpScenario = ipScenarios[Math.floor(Math.random() * ipScenarios.length)];
 
     setState(prev => ({
       ...prev,
@@ -340,9 +550,15 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
       capacitanceCC: 0,
       absorptionIndex: undefined,
       polarizationIndex: undefined,
+      ddIndex: undefined,
+      r15s: undefined,
       r30s: undefined,
       r60s: undefined,
-      r600s: undefined
+      r180s: undefined,
+      r600s: undefined,
+      daIndex: undefined,
+      svScenario: randomSvScenario,
+      ipScenario: randomIpScenario
     }));
   };
 
@@ -391,6 +607,38 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+  
+  const getSimulatedResistance = (startTime: number, time: number, mode: string, voltage: number, scenario?: string) => {
+    // Implementar lógica de simulação baseada no cenário SV selecionado
+    return 1000;
+  };
+
+  const getSvDiagnosis = (scenario: string | undefined): { label: string, color: string, reason: string } => {
+    if (!scenario) return { label: '---', color: '#666', reason: '' };
+    switch(scenario) {
+      case 'great': return { 
+          label: 'ÓTIMO', 
+          color: '#81C784',
+          reason: 'Resistência de isolamento aumentou com o aumento da tensão, indicando boas condições do isolante e efeito de polarização.'
+      };
+      case 'good': return { 
+          label: 'BOM', 
+          color: '#4CAF50',
+          reason: 'Resistência de isolamento manteve-se estável com o aumento da tensão.'
+      };
+      case 'warning': return { 
+          label: 'ATENÇÃO', 
+          color: '#ffc107',
+          reason: 'Identificada queda de resistência de isolamento de até 35% durante os degraus de tensão.'
+      };
+      case 'dangerous': return { 
+          label: 'PERIGOSO', 
+          color: '#ff6b6b',
+          reason: 'Identificada queda de resistência superior a 35%, indicando provável contaminação severa, umidade ou defeitos na isolação.'
+      };
+      default: return { label: '---', color: '#666', reason: '' };
+    }
+  };
 
   return (
     <div className="screen">
@@ -407,7 +655,6 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
         <EnvironmentalData />
 
         <TestInfo 
-          title="Megôhmetro"
           objective="Medição da resistência de isolamento entre os enrolamentos, entre fases e entre enrolamento e terra para avaliação do estado de degradação do isolamento através de diferentes modos de teste (SV, DD, IP)."
           necessity={[
             "Avaliar o estado de degradação do isolamento através de modos específicos: SV (Step Voltage), DD (Descarga Dielétrica) e IP (Índice de Polarização)",
@@ -457,49 +704,50 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
                       display: 'flex',
                       flexDirection: 'column',
                       justifyContent: 'space-between',
-                      padding: '15px'
+                      padding: '15px',
+                      pointerEvents: 'none'
                     }}>
                       
                       {/* Display Digital no topo */}
                       <div style={{
                         position: 'absolute',
-                        top: '8%',
+                        top: '36%',
                         left: '50%',
                         transform: 'translateX(-50%)',
-                        background: 'rgba(0,20,0,0.95)',
+                        background: 'rgba(0,20,0,0)',
                         border: '3px solid #333',
                         borderRadius: '8px',
-                        padding: '10px 20px',
-                        minWidth: '280px',
+                        padding: '2px 12px',
+                        minWidth: '202px',
                         boxShadow: 'inset 0 2px 10px rgba(0,0,0,0.8)'
                       }}>
                         <div style={{ 
                           display: 'grid', 
                           gridTemplateColumns: '1fr 1fr', 
-                          gap: '8px',
+                          gap: '1px',
                           fontFamily: "'Courier New', monospace"
                         }}>
                           <div style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>RESISTÊNCIA</div>
-                            <div style={{ color: '#00ff00', fontSize: '24px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
-                              {state.resistance.toFixed(0)} <span style={{fontSize: '12px'}}>MΩ</span>
+                            <div style={{ color: '#444444', fontSize: '8px', opacity: 0.7, margin: '1px 0' }}>RESISTÊNCIA</div>
+                            <div style={{ color: '#444444', fontSize: '18px', fontWeight: 'bold', textShadow: 'none', margin: '0' }}>
+                              {state.resistance.toFixed(0)} <span style={{fontSize: '10px'}}>MΩ</span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>TENSÃO</div>
-                            <div style={{ color: '#00ff00', fontSize: '24px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
-                              {state.appliedVoltage.toFixed(0)} <span style={{fontSize: '12px'}}>V</span>
+                            <div style={{ color: '#444444', fontSize: '8px', opacity: 0.7, margin: '1px 0' }}>TENSÃO</div>
+                            <div style={{ color: '#444444', fontSize: '18px', fontWeight: 'bold', textShadow: 'none', margin: '0' }}>
+                              {state.appliedVoltage.toFixed(0)} <span style={{fontSize: '10px'}}>V</span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>CORRENTE</div>
-                            <div style={{ color: '#00ff00', fontSize: '16px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
-                              {state.current.toFixed(3)} <span style={{fontSize: '10px'}}>μA</span>
+                            <div style={{ color: '#444444', fontSize: '8px', opacity: 0.7, margin: '1px 0' }}>CORRENTE</div>
+                            <div style={{ color: '#444444', fontSize: '14px', fontWeight: 'bold', textShadow: 'none', margin: '0' }}>
+                              {state.current.toFixed(3)} <span style={{fontSize: '9px'}}>μA</span>
                             </div>
                           </div>
                           <div style={{ textAlign: 'center' }}>
-                            <div style={{ color: '#00ff00', fontSize: '10px', opacity: 0.7 }}>TEMPO</div>
-                            <div style={{ color: '#00ff00', fontSize: '16px', fontWeight: 'bold', textShadow: '0 0 10px #00ff00' }}>
+                            <div style={{ color: '#444444', fontSize: '8px', opacity: 0.7, margin: '1px 0' }}>TEMPO</div>
+                            <div style={{ color: '#444444', fontSize: '14px', fontWeight: 'bold', textShadow: 'none', margin: '0' }}>
                               {formatTime(state.time)}
                             </div>
                           </div>
@@ -507,22 +755,108 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
                         {state.testMode === 'IP' && (
                           <div style={{ 
                             display: 'grid', 
-                            gridTemplateColumns: '1fr 1fr', 
-                            gap: '8px',
-                            marginTop: '8px',
-                            paddingTop: '8px',
-                            borderTop: '1px solid #00ff0033'
+                            gridTemplateColumns: '1fr 1fr 1fr', 
+                            gap: '1px',
+                            marginTop: '1px',
+                            paddingTop: '1px',
+                            borderTop: '1px solid #44444433'
                           }}>
                             <div style={{ textAlign: 'center' }}>
-                              <div style={{ color: '#ffd700', fontSize: '10px' }}>IA</div>
-                              <div style={{ color: '#ffd700', fontSize: '14px', fontWeight: 'bold' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>DA</div>
+                              <div style={{ color: '#666666', fontSize: '10px', fontWeight: 'bold', margin: '0' }}>
+                                {/* DA = R3min/R30s */}
+                                {(state as any).daIndex ? (state as any).daIndex.toFixed(2) : '--'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>IA</div>
+                              <div style={{ color: '#666666', fontSize: '10px', fontWeight: 'bold', margin: '0' }}>
                                 {state.absorptionIndex ? state.absorptionIndex.toFixed(2) : '--'}
                               </div>
                             </div>
                             <div style={{ textAlign: 'center' }}>
-                              <div style={{ color: '#ffd700', fontSize: '10px' }}>IP</div>
-                              <div style={{ color: '#ffd700', fontSize: '14px', fontWeight: 'bold' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>PI</div>
+                              <div style={{ color: '#666666', fontSize: '10px', fontWeight: 'bold', margin: '0' }}>
                                 {state.polarizationIndex ? state.polarizationIndex.toFixed(2) : '--'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {state.testMode === 'DD' && (
+                          <div style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: '1fr 1fr 1fr', 
+                            gap: '1px',
+                            marginTop: '1px',
+                            paddingTop: '1px',
+                            borderTop: '1px solid #44444433'
+                          }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>CAP CC</div>
+                              <div style={{ color: '#666666', fontSize: '10px', fontWeight: 'bold', margin: '0' }}>
+                                {state.capacitanceCC ? state.capacitanceCC.toFixed(1) : '--'} <span style={{fontSize: '7px'}}>nF</span>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>DD</div>
+                              <div style={{ color: '#666666', fontSize: '10px', fontWeight: 'bold', margin: '0' }}>
+                                {state.ddIndex ? state.ddIndex.toFixed(2) : '--'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>COND.</div>
+                              <div style={{ 
+                                fontSize: '9px', 
+                                fontWeight: 'bold', 
+                                margin: '0',
+                                color: state.ddIndex !== undefined ? (
+                                  state.ddIndex > 7 ? '#cc0000' : 
+                                  state.ddIndex > 4 ? '#ff6600' : 
+                                  state.ddIndex > 2 ? '#ccaa00' : 
+                                  state.ddIndex > 0 ? '#00aa00' : '#0066cc'
+                                ) : '#666666'
+                              }}>
+                                {state.ddIndex !== undefined ? (
+                                  state.ddIndex > 7 ? 'RUIM' : 
+                                  state.ddIndex > 4 ? 'POBRE' : 
+                                  state.ddIndex > 2 ? 'QUEST.' : 
+                                  state.ddIndex > 0 ? 'BOA' : 'HOMOG.'
+                                ) : '--'}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {state.testMode === 'SV' && (
+                          <div style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: '1fr 1fr 1fr 1fr', 
+                            gap: '1px',
+                            marginTop: '1px',
+                            paddingTop: '1px',
+                            borderTop: '1px solid #44444433'
+                          }}>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>1m</div>
+                              <div style={{ color: '#666666', fontSize: '9px', fontWeight: 'bold', margin: '0' }}>
+                                {state.sv1m ? state.sv1m.toFixed(0) : '--'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>2m</div>
+                              <div style={{ color: '#666666', fontSize: '9px', fontWeight: 'bold', margin: '0' }}>
+                                {state.sv2m ? state.sv2m.toFixed(0) : '--'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>3m</div>
+                              <div style={{ color: '#666666', fontSize: '9px', fontWeight: 'bold', margin: '0' }}>
+                                {state.sv3m ? state.sv3m.toFixed(0) : '--'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ color: '#666666', fontSize: '8px', margin: '1px 0' }}>4m</div>
+                              <div style={{ color: '#666666', fontSize: '9px', fontWeight: 'bold', margin: '0' }}>
+                                {state.sv4m ? state.sv4m.toFixed(0) : '--'}
                               </div>
                             </div>
                           </div>
@@ -532,37 +866,74 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
                       {/* Knobs na parte inferior */}
                       <div style={{
                         position: 'absolute',
-                        bottom: '8%',
+                        bottom: '16.5%',
                         left: '50%',
                         transform: 'translateX(-50%)',
-                        display: 'flex',
-                        gap: '60px',
-                        alignItems: 'flex-end'
+                        width: '100%',
+                        height: '100px',
+                        pointerEvents: 'auto'
                       }}>
                         {/* Knob de Modo de Teste */}
-                        <RotaryKnob
-                          label="MODO DE TESTE"
-                          value={state.testMode}
-                          options={[
-                            { value: 'IP', label: 'IP', angle: -45 },
-                            { value: 'DD', label: 'DD', angle: 0 },
-                            { value: 'SV', label: 'SV', angle: 45 }
-                          ]}
-                          onChange={(v) => setState(prev => ({ ...prev, testMode: v as string }))}
-                          size={70}
-                          disabled={state.isRunning}
-                        />
+                        <div style={{ 
+                          position: 'absolute',
+                          left: '27%',
+                          bottom: 0,
+                          transform: 'translateX(-50%) translateX(-17px)',
+                          marginBottom: '1%',
+                          pointerEvents: 'auto'
+                        }}>
+                          <RotaryKnob
+                            
+                            value={state.testMode}
+                            options={[
+                              { value: 'IP', label: 'IP', angle: 0 },
+                              { value: 'DD', label: 'DD', angle: 30 },
+                              { value: 'SV', label: 'SV', angle: 60 }
+                            ]}
+                            onChange={(v) => setState(prev => ({ ...prev, testMode: v as string }))}
+                            size={70}
+                          />
+                        </div>
+
+                        {/* Knob de Tensão */}
+                        <div style={{ 
+                          position: 'absolute',
+                          left: '49.75%',
+                          bottom: 0,
+                          transform: 'translateX(-50%)',
+                          marginBottom: '1%',
+                          pointerEvents: 'auto'
+                        }}>
+                          <RotaryKnob
+                            
+                            value={state.testVoltage}
+                            options={[
+                              { value: 250, label: '250V', angle: 20},
+                              { value: 500, label: '500V', angle: 45},
+                              { value: 1000, label: '1kV', angle: 68 },                   
+                              { value: 2500, label: '2.5kV', angle: 90 },                           
+                              { value: 5000, label: '5kV', angle: 105 },
+                           
+                            ]}
+                            onChange={(v) => setState(prev => ({ ...prev, testVoltage: v as number }))}
+                            size={70}
+                          />
+                        </div>
 
                         {/* Botão de Teste (START/STOP) */}
                         <div 
                           onClick={state.isRunning ? stopTest : startTest}
                           style={{
-                            width: '90px',
-                            height: '90px',
+                            position: 'absolute',
+                            right: '26%',
+                            bottom: '68%',
+                            transform: 'translateX(50%) translateX(7px)',
+                            width: '40px',
+                            height: '40px',
                             borderRadius: '50%',
                             background: state.isRunning 
-                              ? 'linear-gradient(145deg, #ff4444, #cc0000)'
-                              : 'linear-gradient(145deg, #44ff44, #00cc00)',
+                              ? 'linear-gradient(145deg, #ff6666, #cc0000)'
+                              : 'linear-gradient(145deg, #ff6666, #cc0000)',
                             border: '4px solid #333',
                             display: 'flex',
                             alignItems: 'center',
@@ -570,113 +941,163 @@ const MegohmmeterScreen: React.FC<MegohmmeterScreenProps> = ({ onComplete, onBac
                             cursor: 'pointer',
                             boxShadow: state.isRunning
                               ? '0 0 20px rgba(255,0,0,0.5), inset 0 -3px 10px rgba(0,0,0,0.3)'
-                              : '0 0 20px rgba(0,255,0,0.5), inset 0 -3px 10px rgba(0,0,0,0.3)',
+                              : '0 0 20px rgba(255,0,0,0.5), inset 0 -3px 10px rgba(0,0,0,0.3)',
                             transition: 'all 0.2s',
-                            flexDirection: 'column'
+                            flexDirection: 'column',
+                            pointerEvents: 'auto'
                           }}
                         >
                           <span style={{ 
                             color: '#fff', 
                             fontWeight: 'bold', 
-                            fontSize: '14px',
+                            fontSize: '9px',
                             textShadow: '0 1px 3px rgba(0,0,0,0.5)'
                           }}>
                             {state.isRunning ? 'STOP' : 'TEST'}
                           </span>
-                          <span style={{ fontSize: '20px' }}>
+                          <span style={{ fontSize: '16px' }}>
                             {state.isRunning ? '⏹' : '▶'}
                           </span>
                         </div>
-
-                        {/* Knob de Tensão */}
-                        <RotaryKnob
-                          label="TENSÃO (V)"
-                          value={state.testVoltage}
-                          options={[
-                            { value: 500, label: '500V', angle: -135 },
-                            { value: 1000, label: '1kV', angle: -108 },
-                            { value: 1500, label: '1.5kV', angle: -81 },
-                            { value: 2000, label: '2kV', angle: -54 },
-                            { value: 2500, label: '2.5kV', angle: -27 },
-                            { value: 3000, label: '3kV', angle: 0 },
-                            { value: 4000, label: '4kV', angle: 27 },
-                            { value: 5000, label: '5kV', angle: 54 },
-                            { value: 7500, label: '7.5kV', angle: 81 },
-                            { value: 10000, label: '10kV', angle: 108 }
-                          ]}
-                          onChange={(v) => setState(prev => ({ ...prev, testVoltage: v as number }))}
-                          size={70}
-                          disabled={state.isRunning}
-                        />
                       </div>
 
-                      {/* Indicador de Status */}
-                      <div style={{
+                      {/* Cabos do Megôhmetro */}
+                      <svg style={{
                         position: 'absolute',
-                        top: '40%',
-                        right: '5%',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px'
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        pointerEvents: 'none',
+                        zIndex: 10
                       }}>
-                        <div style={{
-                          width: '20px',
-                          height: '20px',
-                          borderRadius: '50%',
-                          background: state.isRunning ? '#00ff00' : '#333',
-                          boxShadow: state.isRunning ? '0 0 15px #00ff00' : 'none',
-                          border: '2px solid #555'
-                        }} title="Em Operação" />
-                        <div style={{
-                          width: '20px',
-                          height: '20px',
-                          borderRadius: '50%',
-                          background: state.appliedVoltage > 0 ? '#ff0000' : '#333',
-                          boxShadow: state.appliedVoltage > 0 ? '0 0 15px #ff0000' : 'none',
-                          border: '2px solid #555'
-                        }} title="Alta Tensão" />
-                      </div>
+                        {/* Cabo Vermelho - Fase do Motor (2% esquerda) */}
+                        <path
+                          d="M 241 140 Q 186 125 136 165 Q 86 205 66 265 L 46 305"
+                          fill="none"
+                          stroke="#cc0000"
+                          strokeWidth="6"
+                          strokeLinecap="round"
+                        />
+                        {/* Conector vermelho - início */}
+                        <circle cx="244" cy="140" r="10" fill="#cc0000" stroke="#990000" strokeWidth="2" />
+                        {/* Conector vermelho - fim */}
+                        <circle cx="49" cy="305" r="10" fill="#cc0000" stroke="#990000" strokeWidth="2" />
+                        <text x="31" y="330" fill="#cc0000" fontSize="10" fontWeight="bold">FASE</text>
+                        
+                        {/* Cabo Preto - Ground (2% cima, 1% direita) */}
+                        <path
+                          d="M 452 135 Q 510 125 560 160 Q 600 200 620 270 L 635 310"
+                          fill="none"
+                          stroke="#333333"
+                          strokeWidth="6"
+                          strokeLinecap="round"
+                        />
+                        {/* Conector preto - início */}
+                        <circle cx="452" cy="139" r="10" fill="#333333" stroke="#111111" strokeWidth="2" />
+                        {/* Conector preto - fim */}
+                        <circle cx="635" cy="314" r="10" fill="#333333" stroke="#111111" strokeWidth="2" />
+                        <text x="620" y="365" fill="#cccccc" fontSize="12" fontWeight="bold">GND</text>
+                        
+                        {/* Símbolo de Ground */}
+                        <g transform="translate(635, 380)">
+                          <line x1="-12" y1="0" x2="12" y2="0" stroke="#cccccc" strokeWidth="2.5" />
+                          <line x1="-8" y1="5" x2="8" y2="5" stroke="#cccccc" strokeWidth="2.5" />
+                          <line x1="-4" y1="10" x2="4" y2="10" stroke="#cccccc" strokeWidth="2.5" />
+                        </g>
+                        
+                        {/* Cabo Vermelho com animação */}
+                        <path
+                          d="M 241 140 Q 186 125 136 165 Q 86 205 66 265 L 46 305"
+                          fill="none"
+                          stroke="#cc0000"
+                          strokeWidth="6"
+                          strokeLinecap="round"
+                          style={{
+                            animation: state.isRunning ? 'cablePulse 0.3s ease-in-out infinite' : 'none',
+                            filter: state.isRunning ? 'drop-shadow(0 0 8px #ff0000)' : 'none'
+                          }}
+                        />
+                      </svg>
                     </div>
                   </div>
 
                   {/* Gráficos */}
                   <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', justifyContent: 'center' }}>
                     {state.testMode === 'SV' && svChartData.length > 0 && (
-                      <Chart
-                        data={svChartData}
+                      <DualAxisChart
+                        data1={svChartData}
+                        data2={svChartCurrentData}
                         labels={svChartLabels}
-                        title="Resistência vs Tensão (Step Voltage)"
-                        yAxisLabel="Resistência (MΩ)"
-                        color="#ffd700"
-                        type="bar"
-                        width={450}
-                        height={200}
+                        title="Step Voltage DC - Fase S"
+                        yLabel1="RI (MΩ)"
+                        yLabel2="Corrente (μA)"
+                        xLabel="Tensão (V)"
+                        width={600}
+                        height={300}
+                        color1="#1f77b4"
+                        color2="#cc0000"
+                        numericXAxis={true}
                       />
                     )}
+                    
+                    {/* Diagnóstico SV - Exibir apenas após o teste finalizar e se houver dados */}
+                    {state.testMode === 'SV' && !state.isRunning && svChartData.length > 0 && (
+                      <div style={{
+                        marginTop: '15px',
+                        padding: '15px',
+                        background: 'rgba(0,0,0,0.6)',
+                        borderRadius: '8px',
+                        border: '1px solid #444',
+                        maxWidth: '600px',
+                        textAlign: 'left'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                           <span style={{ color: '#ccc', fontSize: '14px' }}>Diagnóstico Automático:</span>
+                           <span style={{ 
+                             color: getSvDiagnosis(state.svScenario).color,
+                             fontWeight: 'bold', 
+                             fontSize: '16px',
+                             textTransform: 'uppercase',
+                             border: `1px solid ${getSvDiagnosis(state.svScenario).color}`,
+                             padding: '2px 8px',
+                             borderRadius: '4px',
+                             backgroundColor: `${getSvDiagnosis(state.svScenario).color}20`
+                           }}>
+                             {getSvDiagnosis(state.svScenario).label}
+                           </span>
+                        </div>
+                        <div style={{ color: '#ddd', fontSize: '13px', fontStyle: 'italic', lineHeight: '1.4' }}>
+                           {getSvDiagnosis(state.svScenario).reason}
+                        </div>
+                      </div>
+                    )}
 
-                    {state.testMode === 'DD' && chartData.length > 0 && (
-                      <Chart
-                        data={chartData}
+                    {state.testMode === 'DD' && (ddChargeCurrent.length > 0 || ddDischargeCurrent.length > 0) && (
+                      <DualAxisChart
+                        data1={ddChargeCurrent}
+                        data2={ddDischargeCurrent}
                         labels={chartLabels}
-                        title="Corrente de Descarga vs Tempo"
-                        yAxisLabel="Corrente (μA)"
-                        color="#ff6b6b"
-                        type="line"
-                        width={450}
-                        height={200}
+                        title="Polarização e Despolarização"
+                        yLabel1="Corrente Carga (μA)"
+                        yLabel2="Corrente Descarga (μA)"
+                        width={500}
+                        height={250}
+                        singleAxis={true}
+                        singleAxisLabel="Corrente (μA)"
                       />
                     )}
 
                     {state.testMode === 'IP' && chartData.length > 0 && (
-                      <Chart
-                        data={chartData}
+                      <DualAxisChart
+                        data1={chartData}
+                        data2={chartCurrentData}
                         labels={chartLabels}
-                        title="Resistência de Isolamento vs Tempo"
-                        yAxisLabel="Resistência (MΩ)"
-                        color="#00ff00"
-                        type="line"
-                        width={450}
-                        height={200}
+                        title="Índice de Polarização"
+                        yLabel1="Resistência (MΩ)"
+                        yLabel2="Corrente (μA)"
+                        width={500}
+                        height={250}
                       />
                     )}
                   </div>

@@ -31,6 +31,45 @@ O simulador oferece 4 tipos de ensaios:
   - Botões "Iniciar/Parar Teste"
 - **Displays**: Tensão aplicada, resistência, corrente, constante de tempo, capacitância CC
 
+**Modos de Medição Detalhados**
+
+**1. Teste IR (Spot) e IR(t) (Temporizado)**
+- O teste IR pontual ('Spot') ou temporizado é selecionado no botão rotativo de modo.
+- O teste temporizado IR(t) encerra automaticamente o teste após um tempo predefinido (padrão de 1 minuto). Isso evita que o operador precise monitorar o display durante todo o teste e perca a leitura de 1 minuto.
+- Ao final do teste, a Capacitância de isolamento (C) e a Constante de Tempo (TC) associada são calculadas e exibidas.
+
+**2. Testes de Índice de Polarização (PI) e Absorção Dielétrica (DAR)**
+- São medições da resistência ao longo do tempo expressas como uma razão.
+- Assume-se que a temperatura não varia muito durante o teste, tornando o resultado independente da temperatura.
+- **DAR (Dielectric Absorption Ratio)**: Razão entre a resistência em 60 segundos e 30 segundos.
+  - `DAR = IR60s / IR30s`
+  - *Condição:* < 1 (Ruim), 1 – 1.4 (Aceitável), 1.4 – 1.6 (Excelente).
+- **PI (Polarization Index)**: Razão entre a resistência em 10 minutos e 1 minuto.
+  - `PI = IR10min / IR1min`
+  - *Condição:* < 1 (Ruim), 1 - 2 (Questionável), 2 - 4 (Aceitável), > 4 (Bom).
+
+**3. Teste de Descarga Dielétrica (DD)**
+- O teste DD (Dielectric Discharge) ou corrente de reabsorção opera durante a descarga do dielétrico sob teste.
+- Permite avaliar envelhecimento, deterioração e vazios no isolamento, independentemente de contaminação superficial.
+- O isolador é carregado por tempo suficiente para estabilização (padrão 30 minutos) e então descarregado.
+- O instrumento mede a corrente de descarga 1 minuto após a remoção da tensão.
+- `DD = I1min / (V x C)`
+  - Onde I1min é a corrente de descarga em mA, V é a tensão de teste em Volts e C é a capacitância em Farads.
+- *Resultados:*
+  - > 7: Ruim
+  - 4 - 7: Pobre
+  - 2 - 4: Questionável
+  - < 2: Bom
+  - 0: Homogêneo
+
+**4. Modo Step Voltage (SV)**
+- O teste SV é um teste de sobretensão controlada aplicado a enrolamentos (estator/rotor em AC, armadura/campo em DC).
+- Baseia-se no princípio de que um isolador ideal produzirá leituras idênticas em todas as tensões, enquanto um isolador sob estresse mostrará valores menores em tensões maiores.
+- A tensão aumenta incrementalmente em um quinto da tensão final a cada minuto, durante 5 minutos.
+- Leituras de resistência para os primeiros quatro 'degraus' são exibidas como '1m', '2m', '3m', '4m'. A leitura de 5 minutos é o valor principal.
+- Recomendado realizar teste PI antes do SV para garantir adequação.
+
+
 #### c) Tangente Delta (Ponte de Schering)
 - **Equipamento**: Ponte de Schering
 - **Função**: Medição do fator de dissipação e análise de harmônicos
