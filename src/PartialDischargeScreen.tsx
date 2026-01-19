@@ -12,6 +12,213 @@ interface PartialDischargeScreenProps {
 // Tipos de padrões de defeito PD
 type DefectPattern = 'normal' | 'corona' | 'surface' | 'void' | 'floating';
 
+// Typagem para os pontos de descarga
+interface PDPoint {
+  phase: number;
+  magnitude: number;
+  count?: number;
+}
+
+// --- NOVO COMPONENTE: ScopeChart (Ondas Senoidais com pulsos de descarga) ---
+const ScopeChart: React.FC<{ 
+  points: PDPoint[], 
+  voltage: number,
+  isCalibration?: boolean,
+  isInjecting?: boolean,
+  isCalibrated?: boolean,
+  calibrationPulse?: number,
+  ambientNoise?: number,
+  autoScale?: boolean
+}> = ({ points, voltage, isCalibration, isInjecting, isCalibrated, calibrationPulse = 100, ambientNoise = 0.2, autoScale = true }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    // Aumentar resolução para evitar pixelamento
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const width = rect.width;
+    const height = rect.height;
+    const margin = { top: 35, right: 30, bottom: 40, left: 65 };
+    const chartWidth = width - margin.left - margin.right;
+    const chartHeight = height - margin.top - margin.bottom;
+    const centerY = margin.top + chartHeight / 2;
+
+    // Escalonamento Automático
+    let maxMag = 10; 
+    if (autoScale && points.length > 0) {
+      const actualMax = Math.max(...points.map(p => Math.abs(p.magnitude)));
+      if (actualMax > 2) maxMag = actualMax * 1.5;
+    }
+    if (isCalibration) maxMag = Math.max(maxMag, calibrationPulse * 1.3);
+
+    // Limpar fundo
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, width, height);
+
+    // Área do gráfico (levemente mais clara)
+    ctx.fillStyle = '#050505';
+    ctx.fillRect(margin.left, margin.top, chartWidth, chartHeight);
+
+    // Grid pontilhada fina
+    ctx.strokeStyle = '#222';
+    ctx.setLineDash([1, 3]);
+    ctx.lineWidth = 0.5;
+
+    // Grid Vertical (30 em 30 graus)
+    for (let deg = 0; deg <= 360; deg += 30) {
+      const x = margin.left + (deg / 360) * chartWidth;
+      ctx.beginPath();
+      ctx.moveTo(x, margin.top);
+      ctx.lineTo(x, margin.top + chartHeight);
+      ctx.stroke();
+
+      if (deg % 60 === 0) {
+        ctx.fillStyle = '#555';
+        ctx.font = '9px "Segoe UI", Arial';
+        ctx.textAlign = 'center';
+        ctx.setLineDash([]);
+        ctx.fillText(deg.toString(), x, margin.top + chartHeight + 15);
+        ctx.setLineDash([1, 3]);
+      }
+    }
+
+    // Grid Horizontal Dinâmica
+    const steps = 5;
+    for (let i = -steps; i <= steps; i++) {
+      const y = centerY - (i / steps) * (chartHeight / 2);
+      ctx.beginPath();
+      ctx.setLineDash([1, 3]);
+      ctx.moveTo(margin.left, y);
+      ctx.lineTo(margin.left + chartWidth, y);
+      ctx.stroke();
+
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#666';
+      ctx.textAlign = 'right';
+      ctx.font = '9px monospace';
+      const val = (i / steps * maxMag).toFixed(1);
+      ctx.fillText(val, margin.left - 10, y + 3);
+    }
+    ctx.setLineDash([]);
+
+    // Linha de centro sólida
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(margin.left, centerY);
+    ctx.lineTo(margin.left + chartWidth, centerY);
+    ctx.stroke();
+
+    // Bordas do gráfico
+    ctx.strokeStyle = '#444';
+    ctx.strokeRect(margin.left, margin.top, chartWidth, chartHeight);
+
+    // Label Vertical Charge
+    ctx.save();
+    ctx.translate(18, centerY);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#adc112'; // Verde oliva amarelado
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('Charge [C]', 0, 0);
+    ctx.restore();
+
+    // Barra Superior
+    ctx.fillStyle = '#1e1e1e';
+    ctx.fillRect(0, 0, width, 30);
+    ctx.fillStyle = '#3a86ff'; // Azul padrão 1.1
+    ctx.fillRect(0, 0, 45, 30);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('1.1', 22, 20);
+    
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ccc';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('Pulse Diagram', width - 15, 20);
+
+    // Ícones fictícios à direita (conforme imagem)
+    ctx.strokeStyle = '#888';
+    ctx.strokeRect(width - 120, 8, 14, 14);
+    ctx.strokeRect(width - 100, 8, 14, 14);
+    
+    // Senoide
+    ctx.strokeStyle = '#2d3748';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= chartWidth; x++) {
+      const ph = (x / chartWidth) * 360;
+      const y = centerY - Math.sin(ph * Math.PI / 180) * (chartHeight * 0.42);
+      if (x === 0) ctx.moveTo(margin.left + x, y);
+      else ctx.lineTo(margin.left + x, y);
+    }
+    ctx.stroke();
+
+    // Pulsos
+    ctx.lineWidth = 1.2;
+    if (isCalibration) {
+      if (isInjecting || isCalibrated) {
+        // No modo calibração, mostrar pulsos estáveis conforme o valor selecionado
+        [60, 120, 180, 240, 300].forEach(ph => {
+          const x = margin.left + (ph / 360) * chartWidth;
+          // Escala baseada no maxMag para autoScale real
+          const h = (calibrationPulse / maxMag) * (chartHeight / 2);
+          ctx.strokeStyle = '#00ffff'; 
+          ctx.beginPath();
+          ctx.moveTo(x, centerY);
+          ctx.lineTo(x, centerY - h - (Math.random() * 3));
+          ctx.stroke();
+        });
+      }
+    } else {
+      // Grama/Ruído (Noise Floor) baseado no ambientNoise
+      for (let i = 0; i < chartWidth; i += 1.3) {
+        const noiseVal = ambientNoise + (Math.random() - 0.5) * (ambientNoise * 0.5);
+        const h = (noiseVal / maxMag) * (chartHeight / 2);
+        ctx.strokeStyle = '#d4ff0044';
+        ctx.beginPath();
+        ctx.moveTo(margin.left + i, centerY);
+        ctx.lineTo(margin.left + i, centerY - h);
+        ctx.stroke();
+      }
+      // Pulsos reais da medição
+      points.forEach(p => {
+        const x = margin.left + (p.phase / 360) * chartWidth;
+        const h = (p.magnitude / maxMag) * (chartHeight / 2);
+        ctx.strokeStyle = '#d4ff00';
+        ctx.beginPath();
+        ctx.moveTo(x, centerY);
+        ctx.lineTo(x, centerY - h);
+        ctx.stroke();
+      });
+    }
+
+  }, [points, voltage, isCalibration, isInjecting, isCalibrated, calibrationPulse, ambientNoise, autoScale]);
+
+  return (
+    <div style={{ position: 'relative', height: '100%', width: '100%', backgroundColor: '#000', borderRadius: '4px', overflow: 'hidden', border: '1px solid #333' }}>
+      <canvas 
+        ref={canvasRef} 
+        style={{ 
+          width: '100%', 
+          height: '100%', 
+          display: 'block'
+        }} 
+      />
+    </div>
+  );
+};
+
 // Função para gerar padrão PRPD baseado no tipo de defeito - BASEADO NA IMAGEM REAL
 const generatePRPDPattern = (defectType: DefectPattern, currentVoltage: number, maxVoltage: number): { phase: number; magnitude: number; count: number }[] => {
   const points: { phase: number; magnitude: number; count: number }[] = [];
@@ -139,184 +346,98 @@ const ChargeVoltageChart: React.FC<{
 }> = ({ data, title, width, height, maxVoltage }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Formatar tempo em mm:ss
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, width, height);
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
 
-    const margin = { top: 35, right: 50, bottom: 40, left: 55 };
+    const margin = { top: 35, right: 65, bottom: 45, left: 65 };
     const chartWidth = width - margin.left - margin.right;
     const chartHeight = height - margin.top - margin.bottom;
 
-    // Background branco como na imagem
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, width, height);
     
-    // Área do gráfico cinza claro
-    ctx.fillStyle = '#f8f8f8';
+    ctx.fillStyle = '#050505';
     ctx.fillRect(margin.left, margin.top, chartWidth, chartHeight);
 
-    // Grid horizontal
-    ctx.strokeStyle = '#e0e0e0';
+    // Grid pontilhada fina
+    ctx.strokeStyle = '#222';
     ctx.lineWidth = 0.5;
+    ctx.setLineDash([1, 4]);
+
     for (let i = 0; i <= 5; i++) {
-      const y = margin.top + (chartHeight / 5) * i;
-      ctx.beginPath();
-      ctx.moveTo(margin.left, y);
-      ctx.lineTo(margin.left + chartWidth, y);
-      ctx.stroke();
+        const y = margin.top + (chartHeight / 5) * i;
+        ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + chartWidth, y); ctx.stroke();
     }
-
-    // Grid vertical
     for (let i = 0; i <= 6; i++) {
-      const x = margin.left + (chartWidth / 6) * i;
-      ctx.beginPath();
-      ctx.moveTo(x, margin.top);
-      ctx.lineTo(x, margin.top + chartHeight);
-      ctx.stroke();
+        const x = margin.left + (chartWidth / 6) * i;
+        ctx.beginPath(); ctx.moveTo(x, margin.top); ctx.lineTo(x, margin.top + chartHeight); ctx.stroke();
     }
+    ctx.setLineDash([]);
 
-    // Legenda no topo
-    const legendY = 12;
-    
-    // Q (pC) - vermelho
-    ctx.fillStyle = '#cc0000';
-    ctx.fillRect(width / 2 - 80, legendY - 6, 12, 12);
-    ctx.fillStyle = '#333';
-    ctx.font = '10px Arial';
+    // Legenda Industrial
+    ctx.font = '10px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('Q (pC)', width / 2 - 65, legendY + 4);
-    
-    // V (kV) - verde
-    ctx.fillStyle = '#00aa00';
-    ctx.fillRect(width / 2 + 20, legendY - 6, 12, 12);
-    ctx.fillStyle = '#333';
-    ctx.fillText('V (kV)', width / 2 + 35, legendY + 4);
+    ctx.fillStyle = '#ff3300'; ctx.fillRect(width / 2 - 80, 10, 8, 8);
+    ctx.fillStyle = '#aaa'; ctx.fillText('Q (pC)', width / 2 - 68, 18);
+    ctx.fillStyle = '#00ffff'; ctx.fillRect(width / 2 + 10, 10, 8, 8);
+    ctx.fillStyle = '#aaa'; ctx.fillText('V (kV)', width / 2 + 22, 18);
 
-    if (data.length === 0) {
-      ctx.fillStyle = '#999';
-      ctx.font = '12px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('Aguardando dados...', width / 2, height / 2);
-    } else {
-      // Calcular escalas
-      const maxCharge = Math.max(...data.map(d => d.charge), 0.5) * 1000; // Converter nC para pC
-      const maxChargeRounded = Math.ceil(maxCharge / 500) * 500; // Arredondar para múltiplo de 500
+    if (data.length > 0) {
+      const maxCharge = Math.max(...data.map(d => d.charge * 1000), 500);
+      const maxChargeRounded = Math.ceil(maxCharge / 500) * 500;
       const maxV = maxVoltage / 1000;
-      const maxTime = data.length; // Cada ponto = 1 segundo
 
-      // Desenhar linha de Carga (vermelha)
-      ctx.strokeStyle = '#cc0000';
+      // Linha Q (pC)
+      ctx.strokeStyle = '#ff3300';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      data.forEach((point, i) => {
+      data.forEach((p, i) => {
         const x = margin.left + (i / Math.max(data.length - 1, 1)) * chartWidth;
-        const chargePC = point.charge * 1000; // nC para pC
-        const y = margin.top + chartHeight - (chargePC / maxChargeRounded) * chartHeight;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const y = margin.top + chartHeight - ((p.charge * 1000) / maxChargeRounded) * chartHeight;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       });
       ctx.stroke();
 
-      // Desenhar linha de Tensão (verde)
-      ctx.strokeStyle = '#00aa00';
-      ctx.lineWidth = 2;
+      // Linha V (kV)
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      data.forEach((point, i) => {
+      data.forEach((p, i) => {
         const x = margin.left + (i / Math.max(data.length - 1, 1)) * chartWidth;
-        const y = margin.top + chartHeight - ((point.voltage / 1000) / maxV) * chartHeight;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const y = margin.top + chartHeight - ((p.voltage / 1000) / maxV) * chartHeight;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       });
       ctx.stroke();
 
-      // Eixo Y esquerdo - Q (pC)
-      ctx.fillStyle = '#cc0000';
-      ctx.font = 'bold 10px Arial';
-      ctx.textAlign = 'center';
-      ctx.save();
-      ctx.translate(15, margin.top + chartHeight / 2);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillText('Q (pC)', 0, 0);
-      ctx.restore();
-
-      // Labels Y esquerdo
-      ctx.fillStyle = '#333';
-      ctx.font = '9px Arial';
+      // Labels Lateral
+      ctx.fillStyle = '#888';
+      ctx.font = '9px monospace';
       ctx.textAlign = 'right';
-      const chargeSteps = 5;
-      for (let i = 0; i <= chargeSteps; i++) {
-        const val = maxChargeRounded * (chargeSteps - i) / chargeSteps;
-        const y = margin.top + (chartHeight / chargeSteps) * i;
-        ctx.fillText(val.toLocaleString(), margin.left - 5, y + 3);
+      for (let i = 0; i <= 5; i++) {
+        const y = margin.top + (chartHeight / 5) * i;
+        ctx.fillText(Math.round(maxChargeRounded * (5 - i) / 5).toString(), margin.left - 8, y + 3);
       }
-
-      // Eixo Y direito - V (kV)
-      ctx.fillStyle = '#00aa00';
-      ctx.font = 'bold 10px Arial';
-      ctx.textAlign = 'center';
-      ctx.save();
-      ctx.translate(width - 10, margin.top + chartHeight / 2);
-      ctx.rotate(Math.PI / 2);
-      ctx.fillText('V (kV)', 0, 0);
-      ctx.restore();
-
-      // Labels Y direito
-      ctx.fillStyle = '#333';
-      ctx.font = '9px Arial';
       ctx.textAlign = 'left';
-      const voltSteps = 5;
-      for (let i = 0; i <= voltSteps; i++) {
-        const val = maxV * (voltSteps - i) / voltSteps;
-        const y = margin.top + (chartHeight / voltSteps) * i;
-        ctx.fillText(val.toFixed(0), margin.left + chartWidth + 5, y + 3);
+      for (let i = 0; i <= 5; i++) {
+        const y = margin.top + (chartHeight / 5) * i;
+        ctx.fillText((maxV * (5 - i) / 5).toFixed(1), margin.left + chartWidth + 8, y + 3);
       }
-
-      // Labels X (Tempo)
-      ctx.fillStyle = '#333';
-      ctx.font = '9px Arial';
-      ctx.textAlign = 'center';
-      const timeSteps = 6;
-      for (let i = 0; i <= timeSteps; i++) {
-        const timeVal = Math.floor((maxTime / timeSteps) * i);
-        const x = margin.left + (chartWidth / timeSteps) * i;
-        ctx.fillText(formatTime(timeVal), x, margin.top + chartHeight + 15);
-      }
-
-      // Label do eixo X
-      ctx.font = 'bold 10px Arial';
-      ctx.fillText('Time (mm:ss)', margin.left + chartWidth / 2, height - 5);
     }
 
-    // Eixos
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(margin.left, margin.top);
-    ctx.lineTo(margin.left, margin.top + chartHeight);
-    ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
-    ctx.lineTo(margin.left + chartWidth, margin.top);
-    ctx.stroke();
-
-    // Título
-    ctx.fillStyle = '#333';
-    ctx.font = 'bold 11px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(title, width / 2, 25);
+    ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
+    ctx.strokeRect(margin.left, margin.top, chartWidth, chartHeight);
 
   }, [data, title, width, height, maxVoltage]);
 
-  return <canvas ref={canvasRef} width={width} height={height} style={{ display: 'block', borderRadius: '4px', border: '1px solid #ccc' }} />;
+  return <canvas ref={canvasRef} style={{ display: 'block', borderRadius: '4px', border: '1px solid #333', width: '100%', height: '100%' }} />;
 };
 
 // Componente PRPD Chart - Layout igual à imagem (pC esquerda, Pulsos direita)
@@ -326,221 +447,149 @@ const PRPDChartImproved: React.FC<{
   width: number;
   height: number;
   defectType: string;
-}> = ({ data, title, width, height, defectType }) => {
+  autoScale?: boolean;
+}> = ({ data, title, width, height, defectType, autoScale = true }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, width, height);
+    // Alta resolução
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.scale(dpr, dpr);
 
-    const margin = { top: 25, right: 55, bottom: 40, left: 55 };
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0, 0, width, height);
+
+    const margin = { top: 35, right: 65, bottom: 45, left: 65 };
     const chartWidth = width - margin.left - margin.right;
     const chartHeight = height - margin.top - margin.bottom;
 
-    // Background branco/cinza claro como na imagem
-    ctx.fillStyle = '#f8f8f8';
+    ctx.fillStyle = '#050505';
     ctx.fillRect(margin.left, margin.top, chartWidth, chartHeight);
 
-    // Escala pC (0 a 18000)
-    const maxPC = 18000;
-    const pcSteps = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000];
+    // Escala pC Automática ou Fixa
+    let maxPC = 18000;
+    if (autoScale && data.length > 0) {
+      const maxVal = Math.max(...data.map(d => Math.abs(d.magnitude) * 1000));
+      if (maxVal > 100) maxPC = Math.ceil(maxVal * 1.5 / 1000) * 1000;
+      else maxPC = 1000;
+    }
 
-    // Grid horizontal (pC)
-    ctx.strokeStyle = '#ddd';
+    const stepsCount = 10;
+    const pcSlice = maxPC / stepsCount;
+
+    // Grid horizontal dinâmica
+    ctx.strokeStyle = '#222';
     ctx.lineWidth = 0.5;
-    pcSteps.forEach(pc => {
+    for (let i = 0; i <= stepsCount; i++) {
+      const pc = pcSlice * i;
       const y = margin.top + chartHeight - (pc / maxPC) * chartHeight;
       ctx.beginPath();
       ctx.moveTo(margin.left, y);
       ctx.lineTo(margin.left + chartWidth, y);
       ctx.stroke();
-    });
 
-    // Grid vertical (ângulos)
+      ctx.fillStyle = '#666';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(Math.round(pc).toString(), margin.left - 8, y + 3);
+    }
+
+    // Grid vertical
     for (let deg = 0; deg <= 360; deg += 45) {
       const x = margin.left + (chartWidth / 360) * deg;
       ctx.beginPath();
       ctx.moveTo(x, margin.top);
       ctx.lineTo(x, margin.top + chartHeight);
       ctx.stroke();
+
+      ctx.fillStyle = '#666';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(deg.toString(), x, margin.top + chartHeight + 15);
     }
 
-    // Onda senoidal de referência (tensão) - linha cinza
-    ctx.strokeStyle = '#888';
-    ctx.lineWidth = 1.5;
+    // Onda senoidal de referência
+    ctx.strokeStyle = 'rgba(0, 200, 255, 0.2)';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    const sineAmplitude = chartHeight * 0.45;
+    const sineAmplitude = chartHeight * 0.42;
     const sineCenter = margin.top + chartHeight / 2;
-    for (let deg = 0; deg <= 360; deg += 2) {
+    for (let deg = 0; deg <= 360; deg += 1) {
       const x = margin.left + (chartWidth / 360) * deg;
-      const sineValue = Math.sin((deg * Math.PI) / 180);
-      const y = sineCenter - sineValue * sineAmplitude;
+      const y = sineCenter - Math.sin((deg * Math.PI) / 180) * sineAmplitude;
       if (deg === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
 
-    // Agrupar dados por célula para contagem de pulsos
+    // Desenhar pontos de dados (com agrupamento dinâmico)
     const cellMap = new Map<string, { phase: number; pc: number; count: number }>();
-    
+    const pcResolution = maxPC / 80; 
+
     data.forEach(point => {
-      const cellX = Math.floor(point.phase / 3) * 3;
-      const pcValue = Math.abs(point.magnitude) * 1000; // nC para pC
-      const cellY = Math.floor(pcValue / 200) * 200;
+      const cellX = Math.floor(point.phase / 2) * 2;
+      const pcValue = Math.abs(point.magnitude) * 1000;
+      const cellY = Math.floor(pcValue / pcResolution) * pcResolution;
       const key = `${cellX},${cellY}`;
-      
       if (cellMap.has(key)) {
-        const existing = cellMap.get(key)!;
-        existing.count += (point.count || 1);
+        cellMap.get(key)!.count += (point.count || 1);
       } else {
-        cellMap.set(key, {
-          phase: point.phase,
-          pc: pcValue,
-          count: point.count || 1
-        });
+        cellMap.set(key, { phase: point.phase, pc: pcValue, count: point.count || 1 });
       }
     });
 
-    // Encontrar contagem máxima para escala de cores
     let maxCount = 1;
-    cellMap.forEach(cell => {
-      if (cell.count > maxCount) maxCount = cell.count;
-    });
-    maxCount = Math.max(maxCount, 208); // Máximo como na imagem
+    cellMap.forEach(cell => { if (cell.count > maxCount) maxCount = cell.count; });
+    maxCount = Math.max(maxCount, 150);
 
-    // Função de cor baseada na contagem (verde -> amarelo -> laranja -> vermelho)
     const getCountColor = (count: number): string => {
-      const ratio = Math.min(count / maxCount, 1);
-      
-      if (ratio < 0.15) {
-        // Verde escuro -> verde claro
-        return `rgb(0, ${Math.floor(100 + ratio * 6.67 * 155)}, 0)`;
-      } else if (ratio < 0.35) {
-        // Verde -> verde-amarelo
-        const t = (ratio - 0.15) / 0.2;
-        return `rgb(${Math.floor(t * 180)}, 255, 0)`;
-      } else if (ratio < 0.55) {
-        // Amarelo
-        const t = (ratio - 0.35) / 0.2;
-        return `rgb(${Math.floor(180 + t * 75)}, ${Math.floor(255 - t * 50)}, 0)`;
-      } else if (ratio < 0.75) {
-        // Laranja
-        const t = (ratio - 0.55) / 0.2;
-        return `rgb(255, ${Math.floor(205 - t * 100)}, 0)`;
-      } else {
-        // Vermelho
-        const t = (ratio - 0.75) / 0.25;
-        return `rgb(255, ${Math.floor(105 - t * 105)}, 0)`;
-      }
+      const r = Math.min(count / maxCount, 1);
+      if (r < 0.2) return `rgb(0, 255, 100)`;
+      if (r < 0.4) return `rgb(100, 255, 0)`;
+      if (r < 0.6) return `rgb(255, 255, 0)`;
+      if (r < 0.8) return `rgb(255, 150, 0)`;
+      return `rgb(255, 0, 0)`;
     };
 
-    // Desenhar pontos de dados
     const scale = chartHeight / maxPC;
-    
     cellMap.forEach(point => {
       const x = margin.left + (chartWidth / 360) * point.phase;
       const y = margin.top + chartHeight - point.pc * scale;
-      
-      const color = getCountColor(point.count);
-      ctx.fillStyle = color;
-      
-      const size = Math.max(2, Math.min(4, 2 + point.count * 0.05));
+      ctx.fillStyle = getCountColor(point.count);
+      const size = Math.max(2.5, 3);
       ctx.fillRect(x - size/2, y - size/2, size, size);
     });
 
-    // Eixo esquerdo (frame)
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(margin.left, margin.top);
-    ctx.lineTo(margin.left, margin.top + chartHeight);
-    ctx.lineTo(margin.left + chartWidth, margin.top + chartHeight);
-    ctx.lineTo(margin.left + chartWidth, margin.top);
-    ctx.lineTo(margin.left, margin.top);
-    ctx.stroke();
-
-    // Labels eixo Y esquerdo (pC)
-    ctx.fillStyle = '#333';
-    ctx.font = '9px Arial';
-    ctx.textAlign = 'right';
-    pcSteps.forEach(pc => {
-      const y = margin.top + chartHeight - (pc / maxPC) * chartHeight;
-      ctx.fillText(pc.toString(), margin.left - 5, y + 3);
-    });
-
-    // Label "pC" no eixo Y esquerdo
-    ctx.save();
-    ctx.translate(15, margin.top + chartHeight / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 11px Arial';
-    ctx.fillStyle = '#333';
-    ctx.fillText('pC', 0, 0);
-    ctx.restore();
-
-    // Labels eixo X (Phase deg.)
-    ctx.textAlign = 'center';
-    ctx.font = '9px Arial';
-    [0, 45, 90, 135, 180, 225, 270, 315, 360].forEach(deg => {
-      const x = margin.left + (chartWidth / 360) * deg;
-      ctx.fillText(deg.toString(), x, margin.top + chartHeight + 15);
-    });
-
-    // Label "Phase deg." no eixo X
-    ctx.font = 'bold 10px Arial';
-    ctx.fillText('Phase deg.', margin.left + chartWidth / 2, height - 5);
-
-    // === ESCALA DE CORES À DIREITA (Contagem de Pulsos) ===
-    const colorBarWidth = 18;
-    const colorBarHeight = chartHeight;
-    const colorBarX = margin.left + chartWidth + 8;
-    const colorBarY = margin.top;
-
-    // Desenhar gradiente de cores (de baixo para cima: verde -> amarelo -> vermelho)
-    for (let i = 0; i < colorBarHeight; i++) {
-      const ratio = 1 - i / colorBarHeight;
-      const count = ratio * maxCount;
-      ctx.fillStyle = getCountColor(count);
-      ctx.fillRect(colorBarX, colorBarY + i, colorBarWidth, 1);
+    // Barra de cores industrial à direita
+    const cbW = 12, cbH = chartHeight, cbX = margin.left + chartWidth + 8;
+    for (let i = 0; i < cbH; i++) {
+        const ratio = 1 - i / cbH;
+        ctx.fillStyle = getCountColor(ratio * maxCount);
+        ctx.fillRect(cbX, margin.top + i, cbW, 1);
     }
-
-    // Borda da escala de cores
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(colorBarX, colorBarY, colorBarWidth, colorBarHeight);
-
-    // Labels da escala de cores (pulsos)
-    ctx.fillStyle = '#333';
-    ctx.font = '9px Arial';
-    ctx.textAlign = 'left';
-    
-    // Valores da escala como na imagem (208, 150, 100, 50, 0)
-    const pulseLabels = [
-      { val: maxCount, pos: 0 },
-      { val: Math.round(maxCount * 0.75), pos: 0.25 },
-      { val: Math.round(maxCount * 0.5), pos: 0.5 },
-      { val: Math.round(maxCount * 0.25), pos: 0.75 },
-      { val: 0, pos: 1 }
-    ];
-    
-    pulseLabels.forEach(label => {
-      const y = colorBarY + label.pos * colorBarHeight;
-      ctx.fillText(label.val.toString(), colorBarX + colorBarWidth + 3, y + 4);
+    ctx.strokeStyle = '#444';
+    ctx.strokeRect(cbX, margin.top, cbW, cbH);
+    [maxCount, Math.round(maxCount/2), 0].forEach((v, i) => {
+        ctx.fillStyle = '#666';
+        ctx.fillText(v.toString(), cbX + cbW + 5, margin.top + (i * cbH / 2) + 3);
     });
 
     // Título
-    ctx.fillStyle = '#333';
-    ctx.font = 'bold 11px Arial';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(title, margin.left + chartWidth / 2, 15);
+    ctx.fillText(title, margin.left + chartWidth / 2, 18);
 
   }, [data, title, width, height, defectType]);
 
-  return <canvas ref={canvasRef} width={width} height={height} style={{ display: 'block', borderRadius: '4px', backgroundColor: '#fff', border: '1px solid #ccc' }} />;
+  return <canvas ref={canvasRef} style={{ display: 'block', borderRadius: '4px', border: '1px solid #333', width: '100%', height: '100%' }} />;
 };
 
 const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onComplete, onBack }) => {
@@ -548,7 +597,19 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
   const [targetVoltage, setTargetVoltage] = useState(8000); // Tensão alvo em V (8 kV)
   const [startVoltage] = useState(1500); // Tensão inicial 1.5 kV
   const [voltageStep] = useState(500); // Passo de 0.5 kV
-  const [holdTime] = useState(5); // Tempo de espera em segundos (simulando 5 min)
+  const [holdTime] = useState(10); // Tempo de espera em segundos (10 segundos)
+
+  // Calibração
+  const [isCalibrated, setIsCalibrated] = useState(false);
+  const [calibrationPulse, setCalibrationPulse] = useState(100); // pC (padrão 100 como na imagem)
+  const [calibrationFactor, setCalibrationFactor] = useState(1); // pC/mV
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [isInjecting, setIsInjecting] = useState(false);
+  const [calibrationStep, setCalibrationStep] = useState(0);
+  const [ambientNoise, setAmbientNoise] = useState(0.5); // pC
+  const [autoScale, setAutoScale] = useState(true);
+  const [lastCalibrationDate, setLastCalibrationDate] = useState('01/01/1970 01:00');
+  const [calibrationState, setCalibrationState] = useState<'Valid' | 'Invalid'>('Invalid');
 
   const [state, setState] = useState<PartialDischargeState>({
     appliedVoltage: 1500,
@@ -561,8 +622,9 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
 
   const [prpdData, setPRPDData] = useState<{ phase: number; magnitude: number; count?: number }[]>([]);
   const [defectType, setDefectType] = useState<DefectPattern>('void');
-  const [phase, setPhase] = useState<'ramping' | 'holding' | 'finished'>('ramping');
+  const [phase, setPhase] = useState<'ramping' | 'holding' | 'ramping_down' | 'finished'>('ramping');
   const [holdCounter, setHoldCounter] = useState(0);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   // Histórico para gráfico Carga x Tensão (ACUMULA, não apaga)
   const [chargeVoltageHistory, setChargeVoltageHistory] = useState<{ voltage: number; charge: number }[]>([]);
@@ -586,7 +648,6 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
         setState(prev => {
           const newTime = prev.time + 1;
           let newVoltage = prev.appliedVoltage;
-          let newPhase = phase;
           let newHoldCounter = holdCounter;
 
           // Lógica de incremento de tensão
@@ -594,7 +655,6 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
             if (prev.appliedVoltage < targetVoltage) {
               newVoltage = Math.min(prev.appliedVoltage + voltageStep, targetVoltage);
             } else {
-              newPhase = 'holding';
               setPhase('holding');
               newHoldCounter = 0;
             }
@@ -602,7 +662,12 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
             newHoldCounter = holdCounter + 1;
             setHoldCounter(newHoldCounter);
             if (newHoldCounter >= holdTime) {
-              newPhase = 'finished';
+              setPhase('ramping_down');
+            }
+          } else if (phase === 'ramping_down') {
+            if (prev.appliedVoltage > startVoltage) {
+              newVoltage = Math.max(prev.appliedVoltage - voltageStep, startVoltage);
+            } else {
               setPhase('finished');
             }
           }
@@ -661,7 +726,7 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
     }
 
     return () => clearInterval(interval);
-  }, [state.isRunning, defectType, prpdData, phase, holdCounter, targetVoltage, voltageStep, holdTime]);
+  }, [state.isRunning, defectType, prpdData, phase, holdCounter, targetVoltage, voltageStep, holdTime, startVoltage]);
 
   const handleStart = () => {
     selectRandomDefect();
@@ -678,13 +743,31 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
     }));
   };
 
-  const handleStop = () => setState(prev => ({ ...prev, isRunning: false }));
+  const handleStop = () => {
+    setState(prev => ({ ...prev, isRunning: false }));
+    // Simular salvamento do arquivo
+    const link = document.createElement('a');
+    link.href = '/docs/PD6-TETTEX.zip';
+    link.download = 'PD6-TETTEX.zip';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    alert('Arquivo PD6-TETTEX.zip salvo com sucesso!');
+  };
+
+  const handlePrint = () => {
+    setIsPrinting(true);
+    setTimeout(() => setIsPrinting(false), 300);
+    // Simulação visual de print
+    console.log('Capturando PRPD e Gráficos...');
+  };
 
   const handleComplete = () => {
     onComplete({
       type: 'Descarga Parcial',
       appliedVoltage: state.appliedVoltage,
       maxPD: pdParams.Qm,
+      finalDischargeLevel: pdParams.Qm,
       avgPulseCount: pdParams.frequency,
       defectType,
       measurements: state.measurements,
@@ -702,10 +785,27 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
     }
   };
 
+  const handleCalibrate = () => {
+    setIsCalibrating(true);
+    setCalibrationStep(1);
+    setTimeout(() => {
+      setCalibrationStep(2);
+      setTimeout(() => {
+        setCalibrationStep(3);
+        setIsCalibrated(true);
+        setIsCalibrating(false);
+        setIsInjecting(false); // Para a injeção após calibrar
+        setCalibrationState('Valid');
+        setLastCalibrationDate(new Date().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }));
+      }, 2000);
+    }, 2000);
+  };
+
   const getPhaseText = () => {
     switch (phase) {
       case 'ramping': return `Subindo tensão... ${(state.appliedVoltage/1000).toFixed(1)} / ${(targetVoltage/1000).toFixed(1)} kV`;
       case 'holding': return `Mantendo ${(targetVoltage/1000).toFixed(1)} kV (${holdCounter}/${holdTime}s)`;
+      case 'ramping_down': return `Descendo tensão... ${(state.appliedVoltage/1000).toFixed(1)} / ${(startVoltage/1000).toFixed(1)} kV`;
       case 'finished': return 'Teste concluído';
       default: return '';
     }
@@ -714,286 +814,456 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
   const defectInfo = defectDescriptions[defectType];
 
   return (
-    <div style={{ padding: '10px', maxWidth: '1400px', margin: '0 auto', backgroundColor: '#0a0a0a', minHeight: '100vh' }}>
-      {/* Header compacto */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px', borderBottom: '1px solid #222', paddingBottom: '8px' }}>
-        <img src={PD_MEASUREMENT_IMAGE} alt="PD" style={{ height: '50px', borderRadius: '4px', border: '1px solid #222' }} />
+    <div style={{ 
+      padding: '15px', 
+      maxWidth: '1400px', 
+      margin: '0 auto', 
+      backgroundColor: isPrinting ? '#fff' : '#0a0a0a', 
+      transition: 'background-color 0.1s ease',
+      minHeight: '100vh', 
+      fontFamily: 'Arial, sans-serif' 
+    }}>
+      {/* Header Industrial Compacto */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '15px', borderBottom: '1px solid #222', paddingBottom: '10px' }}>
+        <img src={PD_MEASUREMENT_IMAGE} alt="PD" style={{ height: '50px', borderRadius: '4px', border: '1px solid #333' }} />
         <div style={{ flex: 1 }}>
-          <h2 style={{ color: '#00ff00', margin: 0, fontSize: '14px' }}>Sistema de Medição de Descarga Parcial (PD)</h2>
-          <p style={{ color: '#555', margin: 0, fontSize: '10px' }}>DDX Tettex - IEC 60270</p>
-        </div>
-        {state.isRunning && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: '#1a0000', padding: '5px 10px', borderRadius: '4px', border: '1px solid #330000' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ff0000', animation: 'blink 0.8s infinite' }} />
-            <span style={{ color: '#ff4444', fontSize: '10px', fontWeight: 'bold' }}>GRAVANDO</span>
+          <h2 style={{ color: '#00ffcc', margin: 0, fontSize: '16px', letterSpacing: '1px' }}>PD ANALYZER & DIAGNOSTIC SYSTEM</h2>
+          <div style={{ display: 'flex', gap: '15px', marginTop: '2px' }}>
+            <span style={{ color: '#555', fontSize: '9px' }}>MODEL: TETTEX DDX 9101</span>
+            <span style={{ color: '#555', fontSize: '9px' }}>|</span>
+            <span style={{ color: '#555', fontSize: '9px' }}>STANDARD: IEC 60270</span>
           </div>
-        )}
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ color: '#00ff00', fontSize: '18px', fontFamily: 'monospace' }}>{state.time}s</div>
-          <div style={{ color: '#444', fontSize: '9px' }}>TEMPO</div>
+        </div>
+        
+        <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+          <button
+            onClick={onBack}
+            style={{
+              padding: '6px 12px',
+              backgroundColor: '#111',
+              color: '#888',
+              border: '1px solid #222',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '10px'
+            }}
+          >
+            ← VOLTAR
+          </button>
         </div>
       </div>
-
-      <EnvironmentalData />
 
       <TabComponent
         tabs={[
           {
-            label: 'Medição',
-            icon: '📊',
+            label: 'Explicação',
+            icon: '📖',
             content: (
-              <div style={{ backgroundColor: '#050505', padding: '10px', borderRadius: '4px' }}>
-                {/* Status do teste */}
-                {state.isRunning && (
-                  <div style={{ 
-                    marginBottom: '10px', 
-                    padding: '6px 12px', 
-                    backgroundColor: '#111',
-                    borderRadius: '4px',
-                    border: `1px solid ${phase === 'finished' ? '#00ff00' : '#ffaa00'}`,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <span style={{ color: phase === 'finished' ? '#00ff00' : '#ffaa00', fontSize: '11px' }}>
-                      {getPhaseText()}
-                    </span>
-                    <span style={{ color: defectInfo.color, fontSize: '10px' }}>
-                      Padrão: {defectInfo.name}
-                    </span>
-                  </div>
-                )}
+              <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '6px', color: '#333', overflowY: 'auto', maxHeight: '72vh' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #4CAF50', paddingBottom: '10px', marginBottom: '20px' }}>
+                  <h3 style={{ color: '#4CAF50', margin: 0, fontSize: '20px' }}>Guia Técnico de Medição de DP (IEC 60270)</h3>
+                  <span style={{ fontSize: '10px', color: '#888' }}>Ref: Haefely/Tettex Theory Manual</span>
+                </div>
 
-                {/* Layout principal */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
+                  <div>
+                    <h4 style={{ color: '#2196F3', fontSize: '15px' }}>1. O que é Descarga Parcial?</h4>
+                    <p style={{ fontSize: '12px', lineHeight: '1.6' }}>
+                      A ocorrência de Descargas Parciais (DP) nos sistemas isolantes de alta tensão é um sintoma de fragilidade na suportabilidade dielétrica, cuja evolução pode acarretar graves consequências para o equipamento.
+                    </p>
+                    <p style={{ fontSize: '12px', lineHeight: '1.6' }}>
+                      Fisicamente, as DP se caracterizam por um processo de ionização em ambiente gasoso (vazios/cavidades) no interior dos isolantes, causado por um intenso campo elétrico que excede o gradiente máximo suportável pelo dielétrico local.
+                    </p>
+                    
+                    <div style={{ backgroundColor: '#f0f7ff', padding: '12px', borderRadius: '4px', borderLeft: '4px solid #2196F3', fontSize: '11px', marginBottom: '15px' }}>
+                      <strong>Importância do Ensaio:</strong>
+                      <ul style={{ marginTop: '5px' }}>
+                        <li>Diagnóstico prematuro de queda de suportabilidade.</li>
+                        <li>Ensaio <strong>não destrutivo</strong> conforme IEC 60270.</li>
+                        <li>Monitoramento da deterioração progressiva do material.</li>
+                      </ul>
+                    </div>
+
+                    <div style={{ backgroundColor: '#f5f5f5', padding: '10px', borderRadius: '4px', fontSize: '11px' }}>
+                      <strong>Classificação de Fontes:</strong>
+                      <ul style={{ marginTop: '5px' }}>
+                        <li><strong>Internas:</strong> Em vazios (voids) ou delaminações.</li>
+                        <li><strong>Superficiais:</strong> No cruzamento de interfaces dielétricas.</li>
+                        <li><strong>Corona:</strong> Em pontas e arestas afiadas no ar/gás.</li>
+                        <li><strong>Partículas:</strong> Movimentação de impurezas metálicas.</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 style={{ color: '#2196F3', fontSize: '15px' }}>2. Modelo de Circuito Equivalente</h4>
+                    <p style={{ fontSize: '12px', lineHeight: '1.6' }}>
+                      O comportamento físico é descrito pelo diagrama de Gemant (Fig 8.2). A relação entre a carga real (q<sub>i</sub>) e a carga aparente medida (q) é:
+                    </p>
+                    <div style={{ padding: '10px', backgroundColor: '#e3f2fd', borderRadius: '4px', textAlign: 'center', fontSize: '14px', fontWeight: 'bold' }}>
+                      q = ΔV · C<sub>b</sub>
+                    </div>
+                    <p style={{ fontSize: '11px', color: '#666', marginTop: '5px' }}>
+                      Onde <strong>q</strong> é a carga que, se injetada nos terminais do objeto, causaria a mesma variação de tensão que a descarga interna real.
+                    </p>
+                  </div>
+                </div>
+
+                <h4 style={{ color: '#2196F3', fontSize: '15px', marginTop: '25px' }}>3. Circuito de Medição e Quadripolo (Z<sub>m</sub>)</h4>
+                <p style={{ fontSize: '12px', lineHeight: '1.6' }}>
+                  A Fig 8.3 detalha o arranjo de ensaio. A corrente de descarga <strong>i(t)</strong> é um pulso extremamente rápido (nanosegundos). Para capturar este sinal, utilizamos um quadripolo de medição (Z<sub>m</sub>) que atua como um filtro passa-faixa.
+                </p>
+                
+                <div style={{ textAlign: 'center', margin: '15px 0' }}>
+                  <img src="/images/measuring.png" alt="Circuito de Medição" style={{ maxWidth: '50%', height: 'auto', borderRadius: '4px', border: '1px solid #eee' }} />
+                  <p style={{ fontSize: '10px', color: '#888', marginTop: '5px' }}>Figura 8.3: Circuito de Medição Padrão IEC 60270</p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '15px', marginTop: '10px' }}>
+                  <div style={{ flex: 1, border: '1px solid #ddd', padding: '10px', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '11px', marginBottom: '5px' }}>Derivação Matemática (Eq 2.14):</div>
+                    <p style={{ fontSize: '10px' }}>A tensão de medição V<sub>m</sub> no domínio da frequência é:</p>
+                    <code style={{ fontSize: '12px', color: '#d32f2f' }}>V<sub>m</sub>(ω) = [q / (C<sub>a</sub> + C<sub>k</sub>)] · |Z<sub>m</sub>(ω)|</code>
+                    <p style={{ fontSize: '10px', marginTop: '5px' }}>Onde C<sub>k</sub> é o capacitor de acoplamento e C<sub>a</sub> o objeto sob teste.</p>
+                  </div>
+                  <div style={{ flex: 1, border: '1px solid #ddd', padding: '10px', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: '11px', marginBottom: '5px' }}>Análise Espectral (Fig 8.6):</div>
+                    <p style={{ fontSize: '10px' }}>O pulso de DP possui um espectro largo. O detector integra a área sob o pulso para calcular a carga em pC (Quasi-integration).</p>
+                  </div>
+                </div>
+
+                <h4 style={{ color: '#2196F3', fontSize: '15px', marginTop: '25px' }}>4. Reconhecimento de Padrão (PRPD)</h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginTop: '10px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#2196F3', color: '#fff' }}>
+                      <th style={{ padding: '8px', border: '1px solid #ddd' }}>Defeito</th>
+                      <th style={{ padding: '8px', border: '1px solid #ddd' }}>Comportamento em Fase</th>
+                      <th style={{ padding: '8px', border: '1px solid #ddd' }}>Características Visuais</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}><strong>Corona</strong></td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>Picos de tensão negativa (270°)</td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>Pulsos de magnitude constante e alta repetição.</td>
+                    </tr>
+                    <tr style={{ backgroundColor: '#f9f9f9' }}>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}><strong>Vazios</strong></td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>Cruzamentos por zero (0-90° / 180-270°)</td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>Simetria entre semi-ciclos positivo e negativo.</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}><strong>Superficial</strong></td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>Início no pico da tensão</td>
+                      <td style={{ padding: '8px', border: '1px solid #ddd' }}>Padrão assimétrico devido a diferentes polaridades.</td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <h4 style={{ color: '#2196F3', fontSize: '15px', marginTop: '25px' }}>5. Calibração e Sensibilidade</h4>
+                <p style={{ fontSize: '12px', lineHeight: '1.6' }}>
+                  De acordo com a seção 8.6, a sensibilidade é limitada pelo ruído ambiente (I<sub>noise</sub>) e pelo setup (C<sub>a</sub>/C<sub>k</sub>). A calibração (Fig 8.5) deve ser feita in-situ para considerar todas as capacitâncias parasitas.
+                </p>
+
+                <div style={{ textAlign: 'center', margin: '15px 0' }}>
+                  <img src="/images/calibrating.jpg" alt="Circuito de Calibração" style={{ maxWidth: '40%', height: 'auto', borderRadius: '4px', border: '1px solid #eee' }} />
+                  <p style={{ fontSize: '10px', color: '#888', marginTop: '5px' }}>Figura 8.5: Procedimento de Calibração com Injetor de Carga</p>
+                </div>
+
+                <div style={{ backgroundColor: '#fff9c4', padding: '15px', borderLeft: '5px solid #fbc02d', marginTop: '10px' }}>
+                  <strong>Sensibilidade Teórica (q<sub>min</sub>):</strong>
+                  <p style={{ fontSize: '11px', margin: '5px 0' }}>q<sub>min</sub> = V<sub>noise,rms</sub> · (C<sub>a</sub> + C<sub>k</sub>) · k<sub>base</sub></p>
+                  <p style={{ fontSize: '10px', color: '#555' }}>Para capacitâncias altas do objeto (C<sub>a</sub> &gt; 10 nF), a sensibilidade diminui drasticamente.</p>
+                </div>
+
+                <div style={{ marginTop: '25px', padding: '15px', backgroundColor: '#e8f5e9', borderRadius: '4px' }}>
+                  <h5 style={{ margin: '0 0 10px 0', color: '#2e7d32' }}>Resumo de Fatores de Configuração (Tab 8.1)</h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', textAlign: 'center', fontSize: '10px' }}>
+                    <div style={{ border: '1px solid #c8e6c9', padding: '5px' }}>
+                      <strong>Setup Normal</strong>
+                      <div style={{ fontSize: '12px', fontWeight: 'bold' }}>k = 0.01</div>
+                    </div>
+                    <div style={{ border: '1px solid #c8e6c9', padding: '5px' }}>
+                      <strong>Setup de Filtro</strong>
+                      <div style={{ fontSize: '12px', fontWeight: 'bold' }}>k = 0.05</div>
+                    </div>
+                    <div style={{ border: '1px solid #c8e6c9', padding: '5px' }}>
+                      <strong>Digitalização</strong>
+                      <div style={{ fontSize: '12px', fontWeight: 'bold' }}>k = 0.10</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px', marginTop: '25px' }}>
+                  <div>
+                    <h4 style={{ color: '#2196F3', fontSize: '15px' }}>6. Tipos de Detectores (IEC 60270 § 4.3)</h4>
+                    <p style={{ fontSize: '11px', lineHeight: '1.5' }}>
+                      O manual Haefely divide os sistemas em:
+                    </p>
+                    <ul style={{ fontSize: '11px', paddingLeft: '20px' }}>
+                      <li><strong>Banda Larga (Wide-band):</strong> Faixa de 30 kHz a 500 kHz. Captura a forma do pulso mas é mais sensível a ruído industrial.</li>
+                      <li><strong>Banda Estreita (Narrow-band):</strong> Sintonizada em uma frequência central (f<sub>0</sub>) com largura de banda Δf. Ideal para evitar interferências de rádio.</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4 style={{ color: '#2196F3', fontSize: '15px' }}>7. Parâmetros Estatísticos de DP</h4>
+                    <p style={{ fontSize: '11px', lineHeight: '1.5' }}>
+                      Além da magnitude pico (q<sub>max</sub>), avaliamos:
+                    </p>
+                    <ul style={{ fontSize: '11px', paddingLeft: '20px' }}>
+                      <li><strong>Taxa de Repetição (n):</strong> Número de pulsos por segundo acima de um limiar.</li>
+                      <li><strong>Carga Total (Q):</strong> Integral da carga em um ciclo.</li>
+                      <li><strong>Dissipação de DP (P<sub>pd</sub>):</strong> P<sub>pd</sub> = Σ q<sub>i</sub> · V<sub>i</sub> · f.</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <h4 style={{ color: '#2196F3', fontSize: '15px', marginTop: '25px' }}>8. Valores de Referência e Critérios de Avaliação</h4>
+                <p style={{ fontSize: '12px', lineHeight: '1.6', marginBottom: '15px' }}>
+                  Conforme os padrões industriais para equipamentos de alta tensão (ex: 13.8kV), os limites de carga aparente (pC) e tensão de início são cruciais para o diagnóstico.
+                </p>
+
+                <div style={{ overflowX: 'auto', marginBottom: '25px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'center' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #ddd' }}>
+                        <th style={{ padding: '10px', border: '1px solid #ddd' }}>Parâmetro</th>
+                        <th style={{ padding: '10px', border: '1px solid #ddd', backgroundColor: '#e8f5e9', color: '#2e7d32' }}>Ótimo</th>
+                        <th style={{ padding: '10px', border: '1px solid #ddd', backgroundColor: '#f1f8e9', color: '#558b2f' }}>Bom</th>
+                        <th style={{ padding: '10px', border: '1px solid #ddd', backgroundColor: '#fffde7', color: '#fbc02d' }}>Atenção</th>
+                        <th style={{ padding: '10px', border: '1px solid #ddd', backgroundColor: '#ffebee', color: '#c62828' }}>Ruim</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={{ padding: '8px', border: '1px solid #ddd', fontWeight: 'bold' }}>DP (pC)</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>≤ 17.000</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>17.000 - 21.000</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>21.000 - 30.000</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>&gt; 30.000</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '8px', border: '1px solid #ddd', fontWeight: 'bold' }}>Tensão Início</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>≥ 3000 x FV</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>2500 - 3000 x FV</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>2000 - 2500 x FV</td>
+                        <td style={{ padding: '8px', border: '1px solid #ddd' }}>&lt; 2000 x FV</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ backgroundColor: '#f0f4f8', padding: '15px', borderRadius: '4px', marginBottom: '25px' }}>
+                  <h5 style={{ margin: '0 0 10px 0', fontSize: '12px' }}>Tabela de Fator de Tensão (FV) por Tensão Nominal</h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px', fontSize: '11px', textAlign: 'center' }}>
+                    <div style={{ border: '1px solid #d1d9e6', padding: '8px', borderRadius: '4px', backgroundColor: '#fff' }}>
+                      <div style={{ fontWeight: 'bold', color: '#2196F3' }}>≥ 13800 V</div>
+                      <div style={{ fontSize: '14px', marginTop: '5px' }}>FV = 2,42</div>
+                    </div>
+                    <div style={{ border: '1px solid #d1d9e6', padding: '8px', borderRadius: '4px', backgroundColor: '#fff' }}>
+                      <div style={{ fontWeight: 'bold', color: '#2196F3' }}>11000 V</div>
+                      <div style={{ fontSize: '14px', marginTop: '5px' }}>FV = 1,96</div>
+                    </div>
+                    <div style={{ border: '1px solid #d1d9e6', padding: '8px', borderRadius: '4px', backgroundColor: '#fff' }}>
+                      <div style={{ fontWeight: 'bold', color: '#2196F3' }}>6600 V</div>
+                      <div style={{ fontSize: '14px', marginTop: '5px' }}>FV = 1,21</div>
+                    </div>
+                    <div style={{ border: '1px solid #d1d9e6', padding: '8px', borderRadius: '4px', backgroundColor: '#fff' }}>
+                      <div style={{ fontWeight: 'bold', color: '#2196F3' }}>4160 V</div>
+                      <div style={{ fontSize: '14px', marginTop: '5px' }}>FV = 0,75</div>
+                    </div>
+                    <div style={{ border: '1px solid #d1d9e6', padding: '8px', borderRadius: '4px', backgroundColor: '#fff' }}>
+                      <div style={{ fontWeight: 'bold', color: '#2196F3' }}>3300 V</div>
+                      <div style={{ fontSize: '14px', marginTop: '5px' }}>FV = 0,6</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '30px', borderTop: '1px solid #eee', paddingTop: '10px', textAlign: 'center' }}>
+                  <p style={{ fontSize: '10px', color: '#999' }}>
+                    Q[IEC]: Picos de Descargas conforme norma IEC 60270 (pC) | INFORMAÇÃO CONFIDENCIAL – PROIBIDA SUA REPRODUÇÃO
+                  </p>
+                </div>
+              </div>
+            )
+          },
+          {
+            label: 'Calibração',
+            icon: '🎯',
+            content: (
+              <div style={{ backgroundColor: '#000', borderRadius: '4px', border: '1px solid #333', display: 'flex', height: '600px', overflow: 'hidden', fontFamily: 'Arial, sans-serif' }}>
+                
+                {/* ÁREA CENTRAL: GRÁFICO DE PULSOS (LADO ESQUERDO) */}
+                <div style={{ flex: 4, position: 'relative', borderRight: '1px solid #222', padding: '10px' }}>
+                  <ScopeChart 
+                    points={[]} 
+                    voltage={0} 
+                    isCalibration={true} 
+                    isInjecting={isInjecting}
+                    isCalibrated={isCalibrated}
+                    calibrationPulse={calibrationPulse}
+                    ambientNoise={ambientNoise}
+                    autoScale={autoScale}
+                  />
+                </div>
+
+                {/* PAINEL DIREITO: METERS & CALIBRATION SETTINGS */}
+                <div style={{ flex: 1.2, display: 'flex', flexDirection: 'column', backgroundColor: '#0a0a0a' }}>
                   
-                  {/* Coluna esquerda: Gráficos */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {/* BLOCO METERS (Topo Direita) */}
+                  <div style={{ padding: '15px', borderBottom: '1px solid #222', flex: 1 }}>
+                    <div style={{ backgroundColor: '#ff3366', color: '#fff', fontSize: '9px', padding: '2px 8px', display: 'inline-block', marginBottom: '10px' }}>1:1</div>
+                    <div style={{ color: '#aaa', fontSize: '11px', textAlign: 'right', marginBottom: '20px' }}>Meters</div>
                     
-                    {/* PRPD Chart */}
-                    <div style={{ backgroundColor: '#000', borderRadius: '4px', padding: '8px', border: '1px solid #1a1a1a' }}>
-                      <PRPDChartImproved
-                        data={prpdData}
-                        title={`PRPD - ${defectInfo.name}`}
-                        width={560}
-                        height={280}
-                        defectType={defectType}
-                      />
+                    <div style={{ textAlign: 'right', marginBottom: '25px' }}>
+                      <div style={{ color: '#888', fontSize: '10px' }}>Charge [IEC]</div>
+                      <div style={{ color: '#eee', fontSize: '32px', fontFamily: 'monospace' }}>{(isCalibrated || isInjecting) ? calibrationPulse.toFixed(1) : '0.0'} pC</div>
                     </div>
 
-                    {/* Gráfico Q(pC) x V(kV) x Tempo */}
-                    <div style={{ backgroundColor: '#fff', borderRadius: '4px', padding: '8px', border: '1px solid #ccc' }}>
-                      <ChargeVoltageChart
-                        data={chargeVoltageHistory}
-                        title="Fase C"
-                        width={560}
-                        height={220}
-                        maxVoltage={targetVoltage}
-                      />
+                    <div style={{ textAlign: 'right', marginBottom: '25px' }}>
+                      <div style={{ color: '#888', fontSize: '10px' }}>Voltage [RMS]</div>
+                      <div style={{ color: '#eee', fontSize: '32px', fontFamily: 'monospace' }}>0.025 V</div>
                     </div>
 
-                    {/* Info do padrão detectado */}
-                    {state.time > 0 && (
-                      <div style={{ 
-                        padding: '8px', 
-                        backgroundColor: '#0a0a0a',
-                        borderRadius: '4px',
-                        borderLeft: `3px solid ${defectInfo.color}`,
-                        border: '1px solid #1a1a1a'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div>
-                            <div style={{ color: defectInfo.color, fontSize: '10px', fontWeight: 'bold' }}>
-                              PADRÃO: {defectInfo.name.toUpperCase()}
-                            </div>
-                            <div style={{ color: '#666', fontSize: '9px', marginTop: '2px' }}>
-                              {defectInfo.description}
-                            </div>
-                          </div>
-                          <div style={{ 
-                            padding: '4px 8px', 
-                            backgroundColor: getSeverityColor(pdParams.severity) + '20',
-                            border: `1px solid ${getSeverityColor(pdParams.severity)}`,
-                            borderRadius: '3px'
-                          }}>
-                            <span style={{ color: getSeverityColor(pdParams.severity), fontSize: '10px', fontWeight: 'bold' }}>
-                              {pdParams.severity.toUpperCase()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ color: '#888', fontSize: '10px' }}>Frequency [Voltage]</div>
+                      <div style={{ color: '#eee', fontSize: '32px', fontFamily: 'monospace' }}>50.00 Hz</div>
+                    </div>
                   </div>
 
-                  {/* Coluna direita: Displays e controles */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {/* BLOCO CALIBRATION CONTROL (Base Direita) - REFEITO CONFORME IMAGEM */}
+                  <div style={{ padding: '15px', color: '#ccc', fontSize: '11px' }}>
                     
-                    {/* Displays digitais 2x2 */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                      <div style={{ backgroundColor: '#111', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
-                        <div style={{ color: '#555', fontSize: '8px', textTransform: 'uppercase' }}>Qm (Máx)</div>
-                        <div style={{ color: getSeverityColor(pdParams.severity), fontSize: '22px', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                          {pdParams.Qm.toFixed(1)}
-                        </div>
-                        <div style={{ color: '#333', fontSize: '8px' }}>nC</div>
+                    <div style={{ marginBottom: '8px', color: '#aaa' }}>Noise & Scaling</div>
+                    <div style={{ backgroundColor: '#2a2a2a', padding: '10px', marginBottom: '15px', border: '1px solid #333' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span>Ruído Ambiente</span>
+                        <input 
+                          type="range" min="0" max="10" step="0.1" 
+                          value={ambientNoise}
+                          onChange={(e) => setAmbientNoise(parseFloat(e.target.value))}
+                          style={{ width: '80px' }}
+                        />
+                        <span style={{ color: '#d4ff00', width: '35px', textAlign: 'right' }}>{ambientNoise.toFixed(1)}</span>
                       </div>
-                      <div style={{ backgroundColor: '#111', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
-                        <div style={{ color: '#555', fontSize: '8px', textTransform: 'uppercase' }}>Qavg</div>
-                        <div style={{ color: '#00ff00', fontSize: '22px', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                          {pdParams.Qavg.toFixed(1)}
-                        </div>
-                        <div style={{ color: '#333', fontSize: '8px' }}>nC</div>
-                      </div>
-                      <div style={{ backgroundColor: '#111', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
-                        <div style={{ color: '#555', fontSize: '8px', textTransform: 'uppercase' }}>Tensão</div>
-                        <div style={{ color: '#ff6600', fontSize: '22px', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                          {(state.appliedVoltage / 1000).toFixed(1)}
-                        </div>
-                        <div style={{ color: '#333', fontSize: '8px' }}>kV</div>
-                      </div>
-                      <div style={{ backgroundColor: '#111', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
-                        <div style={{ color: '#555', fontSize: '8px', textTransform: 'uppercase' }}>Freq</div>
-                        <div style={{ color: '#ffaa00', fontSize: '22px', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                          {pdParams.frequency.toFixed(0)}
-                        </div>
-                        <div style={{ color: '#333', fontSize: '8px' }}>p/s</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span>Auto Scale</span>
+                        <input 
+                          type="checkbox" 
+                          checked={autoScale}
+                          onChange={(e) => setAutoScale(e.target.checked)}
+                          style={{ accentColor: '#3a86ff' }}
+                        />
                       </div>
                     </div>
 
-                    {/* Barra de progresso de tensão */}
-                    <div style={{ backgroundColor: '#111', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <span style={{ color: '#555', fontSize: '8px' }}>PROGRESSO TENSÃO</span>
-                        <span style={{ color: '#ff6600', fontSize: '9px' }}>{((state.appliedVoltage / targetVoltage) * 100).toFixed(0)}%</span>
-                      </div>
-                      <div style={{ height: '6px', backgroundColor: '#222', borderRadius: '3px', overflow: 'hidden' }}>
-                        <div style={{ 
-                          width: `${(state.appliedVoltage / targetVoltage) * 100}%`, 
-                          height: '100%', 
-                          backgroundColor: '#ff6600',
-                          transition: 'width 0.3s'
-                        }} />
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3px' }}>
-                        <span style={{ color: '#444', fontSize: '8px' }}>1.5 kV</span>
-                        <span style={{ color: '#444', fontSize: '8px' }}>{(targetVoltage/1000).toFixed(0)} kV</span>
-                      </div>
-                    </div>
-
-                    {/* Severidade */}
-                    <div style={{ backgroundColor: '#111', padding: '6px', borderRadius: '4px', border: `1px solid ${getSeverityColor(pdParams.severity)}40` }}>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        {['Baixo', 'Médio', 'Alto', 'Crítico'].map(level => (
-                          <div
-                            key={level}
-                            style={{
-                              flex: 1,
-                              padding: '4px',
-                              borderRadius: '2px',
-                              backgroundColor: pdParams.severity === level ? getSeverityColor(level) : '#1a1a1a',
-                              color: pdParams.severity === level ? '#000' : '#444',
-                              fontSize: '8px',
-                              fontWeight: 'bold',
-                              textAlign: 'center'
+                    <div style={{ marginBottom: '8px', color: '#aaa' }}>Detector Calibration</div>
+                    
+                    <div style={{ 
+                      backgroundColor: '#383838', 
+                      padding: '12px', 
+                      borderRadius: '0px', 
+                      border: '1px solid #4a4a4a',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px'
+                    }}>
+                      
+                      {/* Grid de Inputs: Charge e Factor */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <div style={{ marginBottom: '4px', color: '#eee', fontSize: '10px' }}>Charge</div>
+                          <select 
+                            value={calibrationPulse}
+                            onChange={(e) => setCalibrationPulse(parseInt(e.target.value))}
+                            disabled={isCalibrating}
+                            style={{ 
+                              backgroundColor: '#1a1a1a', 
+                              border: '1px solid #777', 
+                              padding: '5px 4px', 
+                              color: '#fff', 
+                              fontSize: '12px',
+                              width: '100%',
+                              outline: 'none'
                             }}
                           >
-                            {level}
+                            <option value={10}>10 pC</option>
+                            <option value={50}>50 pC</option>
+                            <option value={100}>100 pC</option>
+                            <option value={200}>200 pC</option>
+                            <option value={500}>500 pC</option>
+                          </select>
+                        </div>
+                        <div>
+                          <div style={{ marginBottom: '4px', color: '#eee', fontSize: '10px' }}>Factor [pC/mV]</div>
+                          <div style={{ 
+                            backgroundColor: '#1a1a1a', 
+                            border: '1px solid #777', 
+                            padding: '4px', 
+                            color: '#fff', 
+                            fontSize: '12px'
+                          }}>
+                            <input 
+                              type="number" 
+                              value={calibrationFactor}
+                              onChange={(e) => setCalibrationFactor(parseFloat(e.target.value) || 0)}
+                              style={{ background: 'none', border: 'none', color: '#fff', width: '100%', outline: 'none', fontSize: '12px' }}
+                            />
                           </div>
-                        ))}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Configuração */}
-                    <div style={{ backgroundColor: '#111', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
-                      <div style={{ color: '#555', fontSize: '8px', marginBottom: '4px' }}>TENSÃO ALVO</div>
-                      <input 
-                        type="range" 
-                        min="3000" 
-                        max="15000" 
-                        step="500"
-                        value={targetVoltage}
-                        onChange={(e) => setTargetVoltage(parseInt(e.target.value))}
-                        disabled={state.isRunning}
-                        style={{ width: '100%', accentColor: '#ff6600', height: '4px' }}
-                      />
-                      <div style={{ color: '#ff6600', fontSize: '11px', textAlign: 'center' }}>
-                        {(targetVoltage/1000).toFixed(1)} kV
+                      {/* Botões Calibrate e Set */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <button 
+                          onClick={() => {
+                            if (!isInjecting) setIsInjecting(true);
+                            handleCalibrate();
+                          }}
+                          disabled={isCalibrating}
+                          style={{ 
+                            padding: '5px', 
+                            backgroundColor: '#444', 
+                            color: isCalibrating ? '#888' : '#eee', 
+                            border: '1px solid #666', 
+                            cursor: 'pointer',
+                            fontSize: '11px'
+                          }}
+                        >
+                          Calibrate
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setCalibrationState('Valid');
+                            setLastCalibrationDate(new Date().toLocaleString('pt-BR'));
+                          }}
+                          style={{ 
+                            padding: '5px', 
+                            backgroundColor: '#444', 
+                            color: '#eee', 
+                            border: '1px solid #666', 
+                            cursor: 'pointer',
+                            fontSize: '11px'
+                          }}
+                        >
+                          Set
+                        </button>
                       </div>
-                    </div>
 
-                    {/* Botões */}
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button 
-                        onClick={handleStart}
-                        disabled={state.isRunning}
-                        style={{
-                          flex: 1,
-                          padding: '8px',
-                          backgroundColor: state.isRunning ? '#1a1a1a' : '#004400',
-                          color: '#fff',
-                          border: '1px solid #006600',
-                          borderRadius: '3px',
-                          cursor: state.isRunning ? 'not-allowed' : 'pointer',
-                          fontSize: '10px',
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        ▶ INICIAR
-                      </button>
-                      <button 
-                        onClick={handleStop}
-                        disabled={!state.isRunning}
-                        style={{
-                          flex: 1,
-                          padding: '8px',
-                          backgroundColor: !state.isRunning ? '#1a1a1a' : '#440000',
-                          color: '#fff',
-                          border: '1px solid #660000',
-                          borderRadius: '3px',
-                          cursor: !state.isRunning ? 'not-allowed' : 'pointer',
-                          fontSize: '10px',
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        ⏹ PARAR
-                      </button>
-                    </div>
-
-                    <button 
-                      onClick={handleComplete}
-                      disabled={state.measurements.length === 0}
-                      style={{
-                        padding: '8px',
-                        backgroundColor: state.measurements.length === 0 ? '#1a1a1a' : '#003366',
-                        color: '#fff',
-                        border: '1px solid #004488',
-                        borderRadius: '3px',
-                        cursor: state.measurements.length === 0 ? 'not-allowed' : 'pointer',
-                        fontSize: '10px',
-                        fontWeight: 'bold'
-                      }}
-                    >
-                      ✓ CONCLUIR TESTE
-                    </button>
-
-                    {/* Legenda de padrões compacta */}
-                    <div style={{ backgroundColor: '#0a0a0a', padding: '6px', borderRadius: '4px', border: '1px solid #1a1a1a' }}>
-                      <div style={{ color: '#444', fontSize: '7px', marginBottom: '4px' }}>PADRÕES PRPD</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px' }}>
-                        {Object.entries(defectDescriptions).map(([key, info]) => (
-                          <div 
-                            key={key}
-                            style={{
-                              padding: '3px 5px',
-                              backgroundColor: defectType === key ? '#111' : 'transparent',
-                              borderRadius: '2px',
-                              borderLeft: `2px solid ${defectType === key ? info.color : '#222'}`
-                            }}
-                          >
-                            <span style={{ color: info.color, fontSize: '7px' }}>{info.name}</span>
-                          </div>
-                        ))}
+                      {/* Status Information */}
+                      <div style={{ marginTop: '5px', fontSize: '10px', color: '#bbb', lineHeight: '1.4' }}>
+                        <div>Last Calibration Date: <span style={{ color: '#eee' }}>{lastCalibrationDate}</span></div>
+                        <div>Current State: <span style={{ color: calibrationState === 'Valid' ? '#00ffcc' : '#ff4444', fontWeight: 'bold' }}>{calibrationState}</span></div>
                       </div>
+
+                      {isCalibrating && (
+                         <div style={{ color: '#00ffff', fontSize: '9px', fontFamily: 'monospace', marginTop: '4px' }}>
+                            {calibrationStep === 1 && '>> BUSCANDO PULSO...'}
+                            {calibrationStep === 2 && '>> CALCULANDO FATOR...'}
+                            {calibrationStep === 3 && '>> CALIBRAÇÃO OK'}
+                         </div>
+                      )}
+
                     </div>
                   </div>
                 </div>
@@ -1001,85 +1271,142 @@ const PartialDischargeScreen: React.FC<PartialDischargeScreenProps> = ({ onCompl
             )
           },
           {
-            label: 'Explicação',
-            icon: '📖',
+            label: 'Medição',
+            icon: '📊',
             content: (
-              <div style={{ backgroundColor: '#fff', padding: '15px', borderRadius: '6px', color: '#333', fontSize: '12px' }}>
-                <h3 style={{ color: '#4CAF50', marginTop: 0, fontSize: '14px' }}>Teste de Descarga Parcial (PD) - IEC 60270</h3>
+              <div style={{ backgroundColor: '#050505', padding: '10px', borderRadius: '4px' }}>
+                {!isCalibrated && (
+                  <div style={{ backgroundColor: '#331100', color: '#ffaa00', padding: '8px', fontSize: '11px', borderRadius: '4px', border: '1px solid #552200', marginBottom: '10px', textAlign: 'center' }}>
+                    ⚠️ ATENÇÃO: O SISTEMA NÃO FOI CALIBRADO. OS VALORES DE pC PODEM ESTAR INCORRETOS.
+                  </div>
+                )}
+                
+                {/* DASHBOARD 2x2 GRID */}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr', 
+                  gridTemplateRows: 'repeat(2, 300px)', 
+                  gap: '15px',
+                  marginBottom: '10px'
+                }}>
+                  
+                  {/* TOP LEFT: PRPD VIEW */}
+                  <div style={{ backgroundColor: '#000', border: '1px solid #222', borderRadius: '4px', padding: '10px', position: 'relative' }}>
+                    <div style={{ color: '#444', fontSize: '8px', position: 'absolute', top: '8px', right: '12px' }}>DISTR: {defectInfo.name.toUpperCase()}</div>
+                    <PRPDChartImproved 
+                      data={prpdData} 
+                      title="PHASE RESOLVED PD (PRPD)" 
+                      width={600} 
+                      height={260} 
+                      defectType={defectType} 
+                      autoScale={autoScale}
+                    />
+                  </div>
 
-                <h4 style={{ color: '#2196F3', fontSize: '12px' }}>Padrões PRPD Característicos</h4>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: '#4CAF50', color: 'white' }}>
-                      <th style={{ padding: '6px', textAlign: 'left' }}>Tipo</th>
-                      <th style={{ padding: '6px', textAlign: 'left' }}>Característica PRPD</th>
-                      <th style={{ padding: '6px', textAlign: 'left' }}>Localização de Fase</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr style={{ backgroundColor: '#e8f5e9' }}>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>Normal</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>Ruído baixo distribuído</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>Aleatório, &lt;1 nC</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd', color: '#ff6600', fontWeight: 'bold' }}>Corona</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>APENAS pulsos negativos</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>250-290° (pico negativo)</td>
-                    </tr>
-                    <tr style={{ backgroundColor: '#fff3e0' }}>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd', color: '#ffaa00', fontWeight: 'bold' }}>Superficial</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>Assimétrico, maior positivo</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>10-170° (maior) / 190-350°</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd', color: '#ff0000', fontWeight: 'bold' }}>Vazios</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>SIMÉTRICO "rabbit ears"</td>
-                      <td style={{ padding: '6px', borderBottom: '1px solid #ddd' }}>20-80° e 200-260°</td>
-                    </tr>
-                    <tr style={{ backgroundColor: '#fce4ec' }}>
-                      <td style={{ padding: '6px', color: '#ff00ff', fontWeight: 'bold' }}>Flutuante</td>
-                      <td style={{ padding: '6px' }}>Pulsos aleatórios muito altos</td>
-                      <td style={{ padding: '6px' }}>Qualquer fase, alta mag.</td>
-                    </tr>
-                  </tbody>
-                </table>
+                  {/* TOP RIGHT: WAVEFORM VIEW */}
+                  <div style={{ backgroundColor: '#000', border: '1px solid #222', borderRadius: '4px', padding: '10px', position: 'relative' }}>
+                    <ScopeChart 
+                      points={prpdData} 
+                      voltage={state.appliedVoltage} 
+                      ambientNoise={ambientNoise}
+                      autoScale={autoScale}
+                    />
+                  </div>
 
-                <h4 style={{ color: '#2196F3', marginTop: '15px', fontSize: '12px' }}>Procedimento do Teste</h4>
-                <ol style={{ lineHeight: '1.6', paddingLeft: '20px' }}>
-                  <li>Tensão inicial: <strong>1.5 kV</strong></li>
-                  <li>Incremento: <strong>0.5 kV</strong> por segundo</li>
-                  <li>Tensão alvo: <strong>8 kV</strong> (configurável)</li>
-                  <li>Tempo de espera na tensão máxima: <strong>5 segundos</strong></li>
-                  <li>Descargas aumentam com a tensão aplicada</li>
-                </ol>
+                  {/* BOTTOM LEFT: TRENDING VIEW */}
+                  <div style={{ backgroundColor: '#000', border: '1px solid #222', borderRadius: '4px', padding: '10px' }}>
+                    <ChargeVoltageChart data={chargeVoltageHistory} title="TRENDING (Q vs V over Time)" width={600} height={260} maxVoltage={targetVoltage} />
+                  </div>
+
+                  {/* BOTTOM RIGHT: METERS & CONTROLS */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    {/* Metrics Column */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ backgroundColor: '#0a0a0a', padding: '12px', borderRadius: '4px', border: '1px solid #222', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                        <div style={{ color: '#555', fontSize: '9px', textTransform: 'uppercase' }}>Peak Magnitude (Qm)</div>
+                        <div style={{ color: getSeverityColor(pdParams.severity), fontSize: '32px', fontFamily: 'monospace', fontWeight: 'bold' }}>{pdParams.Qm.toFixed(2)}</div>
+                        <div style={{ color: '#333', fontSize: '10px' }}>nC</div>
+                      </div>
+                      <div style={{ backgroundColor: '#0a0a0a', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
+                        <div style={{ color: '#444', fontSize: '8px' }}>VOLTAGE (RMS)</div>
+                        <div style={{ color: '#ff6600', fontSize: '18px', fontFamily: 'monospace', fontWeight: 'bold' }}>{(state.appliedVoltage / 1000).toFixed(1)} kV</div>
+                      </div>
+                      <div style={{ backgroundColor: '#0a0a0a', padding: '8px', borderRadius: '4px', border: '1px solid #222' }}>
+                        <div style={{ color: '#444', fontSize: '8px' }}>SEVERITY</div>
+                        <div style={{ color: getSeverityColor(pdParams.severity), fontSize: '11px', fontWeight: 'bold' }}>{pdParams.severity.toUpperCase()}</div>
+                      </div>
+                    </div>
+
+                    {/* Controls Column */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: '#0f0f0f', padding: '12px', borderRadius: '4px', border: '1px solid #1a1a1a' }}>
+                      <div style={{ fontSize: '9px', color: '#555' }}>CONTROL CENTER</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#444', fontSize: '8px', marginBottom: '3px' }}>
+                          <span>TARGET VOLTAGE</span>
+                          <span>{(targetVoltage/1000).toFixed(1)} kV</span>
+                        </div>
+                        <input type="range" min="3000" max="15000" step="500" value={targetVoltage} onChange={(e) => setTargetVoltage(parseInt(e.target.value))} disabled={state.isRunning} style={{ width: '100%', accentColor: '#ff6600' }} />
+                      </div>
+                      
+                      <div style={{ padding: '5px', backgroundColor: '#000', borderRadius: '3px', border: '1px solid #222' }}>
+                         <div style={{ color: '#00ff00', fontSize: '8px', fontFamily: 'monospace' }}>
+                           {state.isRunning ? `> ${getPhaseText()}` : '> SYSTEM READY'}
+                         </div>
+                      </div>
+
+                    {!state.isRunning ? (
+                      <button onClick={handleStart} style={{ padding: '10px', backgroundColor: '#003311', color: '#00ff00', border: '1px solid #005522', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>START TEST</button>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '5px' }}>
+                        <button onClick={handleStop} style={{ flex: 1, padding: '10px', backgroundColor: '#330000', color: '#ff3333', border: '1px solid #550000', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>STOP TEST</button>
+                        <button onClick={handlePrint} style={{ flex: 1, padding: '10px', backgroundColor: '#332200', color: '#ffcc00', border: '1px solid #553300', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>PRINT</button>
+                      </div>
+                    )}
+                      <button 
+                        onClick={handleComplete} 
+                        disabled={state.measurements.length === 0} 
+                        style={{ 
+                          padding: '10px 15px', 
+                          backgroundColor: state.measurements.length === 0 ? '#111' : '#2e7d32', 
+                          color: state.measurements.length === 0 ? '#333' : '#ffffff', 
+                          border: '1px solid #004488', 
+                          borderRadius: '4px', 
+                          cursor: state.measurements.length === 0 ? 'not-allowed' : 'pointer', 
+                          fontSize: '11px',
+                          fontWeight: 'bold'
+                        }}
+                      >
+                        CONCLUIR E ENVIAR
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <EnvironmentalData />
               </div>
             )
           }
         ]}
       />
 
-      <div style={{ marginTop: '10px' }}>
-        <button
-          onClick={onBack}
-          style={{
-            padding: '8px 16px',
-            backgroundColor: '#222',
-            color: '#888',
-            border: '1px solid #333',
-            borderRadius: '3px',
-            cursor: 'pointer',
-            fontSize: '10px'
-          }}
-        >
-          ← Voltar
-        </button>
-      </div>
-
       <style>{`
         @keyframes blink {
           0%, 50% { opacity: 1; }
           51%, 100% { opacity: 0.2; }
+        }
+        input[type=range] {
+          -webkit-appearance: none;
+          background: #111;
+          height: 4px;
+          border-radius: 2px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          height: 14px;
+          width: 7px;
+          background: #ff6600;
+          cursor: pointer;
+          border-radius: 1px;
         }
       `}</style>
     </div>

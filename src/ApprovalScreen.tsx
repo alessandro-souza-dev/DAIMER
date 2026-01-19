@@ -13,19 +13,16 @@ const ApprovalScreen: React.FC<ApprovalScreenProps> = ({ submission, onApprovalC
 
   const handleApproval = async (step: 'laudista' | 'aprovador', approved: boolean) => {
     setIsProcessing(true);
-
-    // Simular processamento
     await new Promise(resolve => setTimeout(resolve, 2000));
-
     const updatedSubmission = { ...submission };
-    const reviewer = step === 'laudista' ? 'João Silva - Eng. Elétrico' : 'Maria Santos - Coordenadora Técnica';
+    const reviewer = step === 'laudista' ? 'Eng. João Silva (Analista)' : 'Eng. Maria Santos (COORD)';
 
     if (step === 'laudista') {
       updatedSubmission.approvalStatus.laudistaApproval = {
         approved,
         timestamp: new Date(),
         reviewer,
-        comments: approved ? 'Análise técnica aprovada. Valores dentro dos padrões.' : 'Pendências identificadas na análise.'
+        comments: approved ? 'Protocolo validado. Valores em conformidade.' : 'Pendência na calibração dos dados.'
       };
       updatedSubmission.approvalStatus.step = approved ? 'aprovador' : 'laudista';
     } else if (step === 'aprovador') {
@@ -33,7 +30,7 @@ const ApprovalScreen: React.FC<ApprovalScreenProps> = ({ submission, onApprovalC
         approved,
         timestamp: new Date(),
         reviewer,
-        comments: approved ? 'Aprovação final concedida. Proceder com geração do relatório.' : 'Retornado para revisão técnica.'
+        comments: approved ? 'Aprovação final concedida.' : 'Retornado para reanálise.'
       };
       if (approved) {
         updatedSubmission.approvalStatus.step = 'completed';
@@ -53,73 +50,28 @@ const ApprovalScreen: React.FC<ApprovalScreenProps> = ({ submission, onApprovalC
     const approval = step === 'laudista' ? submission.approvalStatus.laudistaApproval : submission.approvalStatus.aprovadorApproval;
 
     return (
-      <div style={{
-        background: approval ? 'rgba(0, 255, 0, 0.1)' : 'rgba(0, 0, 0, 0.5)',
-        border: approval ? '2px solid #00ff00' : '2px solid #ffa500',
-        borderRadius: '15px',
-        padding: '20px',
-        margin: '15px 0',
-        color: 'white'
-      }}>
-        <h4 style={{ color: '#ffd700', marginBottom: '10px' }}>
+      <div className={`approval-step-card ${approval ? 'approved' : 'pending'}`}>
+        <h4 className="approval-title" style={{ color: approval ? '#10b981' : '#fbbf24', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
           {approval ? '✓' : '⏳'} {title}
         </h4>
-        <p style={{ marginBottom: '15px', opacity: 0.9 }}>{description}</p>
+        <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '15px' }}>{description}</p>
 
         {approval ? (
-          <div style={{ fontSize: '0.9rem' }}>
-            <div style={{ marginBottom: '5px' }}>
-              <strong>Revisor:</strong> {approval.reviewer}
+          <div className="approval-info" style={{ fontSize: '0.85rem' }}>
+            <div style={{ marginBottom: '4px' }}><span style={{ color: '#64748b' }}>Responsável:</span> {approval.reviewer}</div>
+            <div style={{ marginBottom: '4px' }}><span style={{ color: '#64748b' }}>Data:</span> {approval.timestamp?.toLocaleString()}</div>
+            <div style={{ color: approval.approved ? '#10b981' : '#ef4444', fontWeight: 'bold' }}>
+              STATUS: {approval.approved ? 'APROVADO' : 'REPROVADO'}
             </div>
-            <div style={{ marginBottom: '5px' }}>
-              <strong>Data:</strong> {approval.timestamp?.toLocaleString()}
-            </div>
-            <div>
-              <strong>Status:</strong> {approval.approved ? 'APROVADO' : 'REPROVADO'}
-            </div>
-            {approval.comments && (
-              <div style={{ marginTop: '10px', fontStyle: 'italic' }}>
-                <strong>Comentários:</strong> {approval.comments}
-              </div>
-            )}
           </div>
         ) : (
-          <div>
+          <div className="approval-controls">
             {isProcessing ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}>
-                <div style={{ fontSize: '1.2rem', marginBottom: '10px' }}>🔄 Processando...</div>
-                <div style={{ color: '#00ff00' }}>Aguarde a análise {step === 'laudista' ? 'técnica' : 'final'}...</div>
-              </div>
+              <div style={{ textAlign: 'center', padding: '10px', color: '#38bdf8' }}>🔄 Sincronizando...</div>
             ) : (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '15px' }}>
-                <button
-                  onClick={() => handleApproval(step, true)}
-                  style={{
-                    padding: '10px 20px',
-                    background: '#28a745',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  ✅ APROVAR
-                </button>
-                <button
-                  onClick={() => handleApproval(step, false)}
-                  style={{
-                    padding: '10px 20px',
-                    background: '#dc3545',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: 'pointer',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  ❌ REPROVAR
-                </button>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={() => handleApproval(step, true)} className="btn btn-success" style={{ flex: 1, padding: '8px', fontSize: '0.8rem' }}>APROVAR</button>
+                <button onClick={() => handleApproval(step, false)} className="btn btn-danger" style={{ flex: 1, padding: '8px', fontSize: '0.8rem' }}>REPROVAR</button>
               </div>
             )}
           </div>
@@ -130,186 +82,61 @@ const ApprovalScreen: React.FC<ApprovalScreenProps> = ({ submission, onApprovalC
 
   return (
     <div className="screen">
-      <div className="report-panel" style={{ maxWidth: '1000px' }}>
-        <div className="report-header">
-          <img src="/daimer_logo.png" alt="DAIMER Logo" style={{ maxWidth: '200px', height: 'auto', marginBottom: '20px' }} />
+      <div className="report-panel" style={{ maxWidth: '800px' }}>
+        <header className="report-header">
+          <img src="/daimer_logo.png" alt="DAIMER" className="logo" style={{ maxWidth: '150px' }} />
+          <h1>Fluxo de Aprovação Digital</h1>
+          <h2>Submissão Técnica #{submission.id}</h2>
+        </header>
 
-          <h1 style={{
-            color: 'white',
-            textAlign: 'center',
-            fontSize: '2.2rem',
-            marginBottom: '10px'
-          }}>
-            Fluxo de Aprovação - DAIMER
-          </h1>
-
-          <h2 style={{
-            color: 'rgba(255,255,255,0.8)',
-            textAlign: 'center',
-            fontSize: '1.3rem',
-            marginBottom: '30px'
-          }}>
-            Submissão #{submission.id}
-          </h2>
+        {/* Timeline Visual */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '30px 0', borderBottom: '1px solid #1e293b', paddingBottom: '30px' }}>
+          {['laudista', 'aprovador', 'completed'].map((s, i) => (
+            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '32px', height: '32px', borderRadius: '50%', 
+                background: currentStep === s ? '#38bdf8' : 
+                           (i === 0 && submission.approvalStatus.laudistaApproval ? '#059669' : 
+                            i === 1 && submission.approvalStatus.aprovadorApproval ? '#059669' : '#1e293b'),
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '0.8rem'
+              }}>{i + 1}</div>
+              <span style={{ fontSize: '0.8rem', color: currentStep === s ? '#fff' : '#64748b' }}>
+                {s === 'laudista' ? 'Análise' : s === 'aprovador' ? 'Revisão' : 'Concluído'}
+              </span>
+              {i < 2 && <div style={{ width: '40px', height: '1px', background: '#334155' }} />}
+            </div>
+          ))}
         </div>
 
-        {/* Status do Processo */}
-        <div style={{
-          background: 'rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(10px)',
-          borderRadius: '15px',
-          padding: '20px',
-          margin: '20px 0',
-          textAlign: 'center'
-        }}>
-          <h3 style={{ color: '#ffd700', marginBottom: '15px' }}>
-            Status Atual: {currentStep === 'laudista' ? 'Análise Técnica (Laudista)' :
-                          currentStep === 'aprovador' ? 'Aprovação Final (Coordenador)' :
-                          'Processo Concluído'}
-          </h3>
-
-          <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '30px',
-            margin: '20px 0'
-          }}>
-            <div style={{
-              padding: '10px 15px',
-              borderRadius: '20px',
-              background: currentStep === 'laudista' ? '#00ff00' :
-                         (submission.approvalStatus.laudistaApproval?.approved ? '#28a745' : '#6c757d'),
-              color: 'white',
-              fontWeight: 'bold'
-            }}>
-              1. Laudista
-            </div>
-            <div style={{ color: 'white', fontSize: '1.5rem' }}>→</div>
-            <div style={{
-              padding: '10px 15px',
-              borderRadius: '20px',
-              background: currentStep === 'aprovador' ? '#00ff00' :
-                         currentStep === 'completed' ? '#28a745' : '#6c757d',
-              color: 'white',
-              fontWeight: 'bold'
-            }}>
-              2. Aprovador
-            </div>
-            <div style={{ color: 'white', fontSize: '1.5rem' }}>→</div>
-            <div style={{
-              padding: '10px 15px',
-              borderRadius: '20px',
-              background: currentStep === 'completed' ? '#00ff00' : '#6c757d',
-              color: 'white',
-              fontWeight: 'bold'
-            }}>
-              3. Relatório
-            </div>
+        <div className="approval-content" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 250px', gap: '24px' }}>
+          <div className="approval-steps">
+            {renderApprovalStep('laudista', 'Verificação Técnica', 'Análise detalhada das resistências e curvas de ensaio.')}
+            
+            {(submission.approvalStatus.laudistaApproval?.approved || currentStep === 'aprovador') && 
+              renderApprovalStep('aprovador', 'Certificação Final', 'Homologação e emissão do certificado de ensaio.')}
+            
+            {currentStep === 'completed' && (
+              <div style={{ background: 'rgba(16, 185, 129, 0.1)', border: '1px solid #059669', borderRadius: '8px', padding: '20px', textAlign: 'center' }}>
+                <h4 style={{ color: '#10b981', marginBottom: '8px' }}>✓ Processo Finalizado</h4>
+                <button onClick={() => window.open(submission.reportUrl, '_blank')} className="btn btn-primary" style={{ width: '100%' }}>BAIXAR RELATÓRIO PDF</button>
+              </div>
+            )}
           </div>
-        </div>
 
-        {/* Detalhes da Submissão */}
-        <div style={{
-          background: 'rgba(0, 0, 0, 0.5)',
-          borderRadius: '10px',
-          padding: '20px',
-          margin: '20px 0'
-        }}>
-          <h4 style={{ color: '#ffd700', marginBottom: '15px' }}>
-            📋 Dados Submetidos
-          </h4>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: '10px'
-          }}>
-            {submission.testResults.map((test, index) => (
-              <div key={index} style={{
-                background: 'rgba(255, 255, 255, 0.1)',
-                padding: '10px',
-                borderRadius: '5px',
-                textAlign: 'center'
-              }}>
-                <div style={{ fontSize: '0.9rem', color: '#00ff00' }}>✓</div>
-                <div style={{ fontSize: '0.8rem' }}>{test.name}</div>
-                <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-                  {test.timestamp.toLocaleTimeString()}
-                </div>
+          <div className="submission-data" style={{ background: '#020617', padding: '20px', borderRadius: '12px', border: '1px solid #1e293b' }}>
+            <h4 style={{ color: '#38bdf8', fontSize: '0.8rem', textTransform: 'uppercase', marginBottom: '16px' }}>Ensaios Coletados</h4>
+            {submission.testResults.map((test, idx) => (
+              <div key={idx} style={{ marginBottom: '12px', fontSize: '0.8rem', borderBottom: '1px solid #1e293b', paddingBottom: '8px' }}>
+                <div style={{ color: '#059669', fontWeight: 'bold' }}>✓ {test.name}</div>
+                <div style={{ color: '#475569' }}>{test.timestamp.toLocaleTimeString()}</div>
               </div>
             ))}
           </div>
-          <div style={{ marginTop: '15px', fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)' }}>
-            <strong>Data de Submissão:</strong> {submission.submittedAt.toLocaleString()}
-          </div>
         </div>
 
-        {/* Etapas de Aprovação */}
-        {renderApprovalStep(
-          'laudista',
-          'Análise Técnica - Laudista',
-          'O especialista técnico analisa os dados coletados e valida os resultados dos ensaios elétricos.'
-        )}
-
-        {submission.approvalStatus.laudistaApproval?.approved && renderApprovalStep(
-          'aprovador',
-          'Aprovação Final - Coordenador',
-          'O coordenador técnico realiza a aprovação final e autoriza a geração do relatório.'
-        )}
-
-        {/* Resultado Final */}
-        {currentStep === 'completed' && (
-          <div style={{
-            background: 'rgba(0, 255, 0, 0.2)',
-            border: '2px solid #00ff00',
-            borderRadius: '15px',
-            padding: '30px',
-            textAlign: 'center',
-            margin: '30px 0'
-          }}>
-            <h3 style={{ color: '#00ff00', marginBottom: '15px', fontSize: '1.5rem' }}>
-              🎉 Processo de Aprovação Concluído
-            </h3>
-            <p style={{ color: 'white', marginBottom: '20px' }}>
-              Todos os dados foram aprovados e o relatório foi gerado com sucesso!
-            </p>
-            <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.8)' }}>
-              O relatório técnico está disponível para download.
-            </div>
-          </div>
-        )}
-
-        {/* Ações */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          gap: '20px',
-          marginTop: '30px'
-        }}>
-          {currentStep === 'completed' ? (
-            <button
-              onClick={() => window.open(submission.reportUrl, '_blank')}
-              className="btn btn-success"
-              style={{
-                fontSize: '1.2rem',
-                padding: '15px 30px'
-              }}
-            >
-              📄 Abrir Relatório
-            </button>
-          ) : (
-            <button
-              onClick={onBack}
-              className="btn btn-secondary"
-              style={{
-                fontSize: '1.2rem',
-                padding: '15px 30px'
-              }}
-            >
-              ← Voltar ao Menu
-            </button>
-          )}
-        </div>
+        <footer style={{ marginTop: '40px', textAlign: 'center' }}>
+          <button className="btn btn-secondary" onClick={onBack}>VOLTAR AO MENU</button>
+        </footer>
       </div>
     </div>
   );

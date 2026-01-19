@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface MenuScreenProps {
   completedTests: string[];
@@ -13,6 +13,16 @@ const MenuScreen: React.FC<MenuScreenProps> = ({
   onSelectTest, 
   onGenerateReport 
 }) => {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleGenerateReportClick = async () => {
+    setIsProcessing(true);
+    // Simula o processamento
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    setIsProcessing(false);
+    onGenerateReport();
+  };
+
   const tests = [
     {
       id: 'microhmeter',
@@ -43,11 +53,13 @@ const MenuScreen: React.FC<MenuScreenProps> = ({
   const allTestsCompleted = tests.every(test => completedTests.includes(test.id));
 
   return (
-    <div className="screen">
-      <img src="/daimer_logo.png" alt="DAIMER Logo" className="logo" />
+    <div className="screen menu-screen">
+      <header className="menu-header">
+        <img src="/daimer_logo.png" alt="DAIMER Logo" className="logo" />
+      </header>
       
       <h1 className="title">Menu de Ensaios</h1>
-      <p className="subtitle">Selecione o ensaio que deseja simular</p>
+      <p className="subtitle">Selecione o ensaio técnico para iniciar a medição</p>
       
       <div className="test-grid">
         {tests.map(test => {
@@ -59,46 +71,55 @@ const MenuScreen: React.FC<MenuScreenProps> = ({
               className={`test-card ${isCompleted ? 'completed' : ''}`}
               onClick={() => onSelectTest(test.id)}
             >
-              <h3>{test.name}</h3>
-              <p><strong>Equipamento:</strong> {test.equipment}</p>
-              <p>{test.description}</p>
+              <div className="test-card-content">
+                <h3>{test.name}</h3>
+                <p><strong>Equipamento:</strong> {test.equipment}</p>
+                <p>{test.description}</p>
+              </div>
               
               <div className={`status-badge ${isCompleted ? 'status-completed' : 'status-pending'}`}>
-                {isCompleted ? 'Concluído' : 'Pendente'}
+                {isCompleted ? '✓ Concluído' : '○ Pendente'}
               </div>
             </div>
           );
         })}
       </div>
       
-      <div className="action-buttons">
+      <div className="action-buttons-panel">
         {allTestsCompleted && (
           <button
-            className="btn btn-primary"
+            className="btn btn-primary pulse-animation"
             onClick={onSubmitData}
-            style={{ marginBottom: '10px' }}
+            disabled={isProcessing}
           >
-            Enviar Dados para DAIMER
+            {isProcessing ? 'Sincronizando...' : 'Enviar Dados para DAIMER'}
           </button>
         )}
         <button
-          className="btn btn-success"
-          onClick={onGenerateReport}
-          disabled={!allTestsCompleted}
+          className={`btn ${allTestsCompleted ? 'btn-success' : 'btn-secondary'}`}
+          onClick={handleGenerateReportClick}
+          disabled={!allTestsCompleted || isProcessing}
         >
-          {allTestsCompleted ? 'Gerar Relatório Final' : `Ensaios Concluídos: ${completedTests.length}/${tests.length}`}
+          {isProcessing ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="spinner"></span> Processando Relatório...
+            </span>
+          ) : (
+            allTestsCompleted ? 'Processar e Gerar Relatório' : `Ensaios: ${completedTests.length} de ${tests.length}`
+          )}
         </button>
       </div>
 
-      <div style={{ marginTop: '20px', color: 'rgba(255,255,255,0.8)', textAlign: 'center' }}>
+      <div className="status-footer">
         {allTestsCompleted ? (
-          <>
-            <p>✅ Todos os ensaios concluídos!</p>
-            <p>1. Clique em "Enviar Dados para DAIMER" para iniciar aprovação</p>
-            <p>2. Após aprovação, clique em "Gerar Relatório Final"</p>
-          </>
+          <div className="status-message success">
+            <p><strong>Protocolo Completo:</strong> Todos os ensaios foram realizados com sucesso.</p>
+            <p>Prossiga com o envio dos dados para validação técnica.</p>
+          </div>
         ) : (
-          <p>Complete todos os ensaios para gerar o relatório final</p>
+          <div className="status-message info">
+            <p>Aguardando conclusão de todos os ensaios para liberação do relatório.</p>
+          </div>
         )}
       </div>
     </div>
@@ -106,4 +127,3 @@ const MenuScreen: React.FC<MenuScreenProps> = ({
 };
 
 export default MenuScreen;
-

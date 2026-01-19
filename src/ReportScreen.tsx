@@ -8,7 +8,6 @@ interface ReportScreenProps {
 
 const ReportScreen: React.FC<ReportScreenProps> = ({ testResults, onNewSimulation }) => {
   const downloadReport = () => {
-    // Criar um link para download do PDF existente
     const link = document.createElement('a');
     link.href = '/D00001F.pdf';
     link.download = 'Relatorio_Ensaios_DAIMER.pdf';
@@ -17,242 +16,113 @@ const ReportScreen: React.FC<ReportScreenProps> = ({ testResults, onNewSimulatio
 
   return (
     <div className="screen">
-      <div className="report-panel">
-        <div className="report-header">
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '30px',
-            marginBottom: '30px'
-          }}>
-            <img src="/daimer_logo.png" alt="DAIMER Logo" style={{ maxWidth: '200px', height: 'auto' }} />
-            <img src="/data_logo.png" alt="DATA Logo" style={{ maxWidth: '150px', height: 'auto' }} />
+      <div className="report-panel" style={{ maxWidth: '900px' }}>
+        <header className="report-header">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '40px', marginBottom: '30px' }}>
+            <img src="/daimer_logo.png" alt="DAIMER" style={{ maxWidth: '180px' }} />
+            <div style={{ width: '2px', height: '40px', background: '#334155' }} />
+            <img src="/data_logo.png" alt="DATA" style={{ maxWidth: '120px' }} />
           </div>
 
-          <h1 style={{
-            color: 'white',
-            textAlign: 'center',
-            fontSize: '2.5rem',
-            marginBottom: '20px'
-          }}>
-            Relatório de Ensaios Elétricos
-          </h1>
+          <h1>Certificado de Ensaios Elétricos</h1>
+          <h2>Documentação Técnica de Conformidade - Plataforma DAIMER</h2>
+        </header>
 
-          <h2 style={{
-            color: 'rgba(255,255,255,0.8)',
-            textAlign: 'center',
-            fontSize: '1.5rem',
-            marginBottom: '30px'
-          }}>
-            DAIMER - Valores Baseados no Relatório
-          </h2>
-        </div>
-
-        <div style={{
-          background: 'rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(10px)',
-          borderRadius: '15px',
-          padding: '30px',
-          margin: '20px 0',
-          textAlign: 'center'
-        }}>
-          <h3 style={{ color: 'white', marginBottom: '20px' }}>
-            🎯 Ensaios Concluídos com Valores do Relatório
+        <div className="report-summary-card">
+          <h3 style={{ color: '#f8fafc', marginBottom: '25px', textAlign: 'center', fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            Resultados Homologados
           </h3>
 
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '15px',
-            marginBottom: '30px'
-          }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '40px' }}>
             {testResults.map((test, index) => (
-              <div key={index} style={{
-                background: 'rgba(0, 255, 0, 0.2)',
-                border: '2px solid #00ff00',
-                borderRadius: '8px',
-                padding: '15px',
-                color: 'white'
-              }}>
-                <div style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
-                  ✓ {test.name}
+              <div key={index} className="result-badge">
+                <div className="result-badge-title">✓ {test.name}</div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '10px' }}>
+                  FINALIZADO EM: {test.timestamp.toLocaleString()}
                 </div>
-                <div style={{ fontSize: '0.9rem' }}>
-                  Concluído em: {test.timestamp.toLocaleString()}
+                
+                <div className="result-badge-data">
+                  {test.id === 'microhmeter' && (
+                    <>
+                      <div style={{ color: '#38bdf8' }}>MEDIDO: {(test.data.finalResistance || 0).toFixed(6)} Ω</div>
+                      <div style={{ color: '#475569', fontSize: '0.7rem' }}>NOMINAL: 0.065164 Ω</div>
+                    </>
+                  )}
+                  {test.id === 'megohmmeter' && (
+                    <>
+                      <div style={{ color: '#38bdf8' }}>MEDIDO: {(test.data.finalResistance || 0).toFixed(0)} MΩ</div>
+                      <div style={{ color: '#475569', fontSize: '0.7rem' }}>NOMINAL: 2430 MΩ</div>
+                    </>
+                  )}
+                  {test.id === 'schering' && (
+                    <>
+                      <div style={{ color: '#38bdf8' }}>MEDIDO: {((test.data.finalTanDelta || 0) * 100).toFixed(3)}%</div>
+                      <div style={{ color: '#475569', fontSize: '0.7rem' }}>NOMINAL: 0.45%</div>
+                    </>
+                  )}
+                  {test.id === 'partial-discharge' && (
+                    <>
+                      <div style={{ color: '#38bdf8' }}>MEDIDO: {(test.data.finalDischargeLevel || 0).toFixed(0)} pC</div>
+                      <div style={{ color: '#475569', fontSize: '0.7rem' }}>NOMINAL: 45 pC</div>
+                    </>
+                  )}
                 </div>
-                {test.id === 'microhmeter' && (
-                  <div style={{ fontSize: '0.8rem', marginTop: '5px', color: '#ffd700' }}>
-                    <strong>Relatório:</strong> 0.065164 Ω
-                    <br />
-                    <span style={{ color: '#00ff00' }}>
-                      Simulado: {test.data.finalResistance.toFixed(6)} Ω
-                    </span>
-                  </div>
-                )}
-                {test.id === 'megohmmeter' && (
-                  <div style={{ fontSize: '0.8rem', marginTop: '5px', color: '#ffd700' }}>
-                    <strong>Relatório:</strong> 2430 MΩ
-                    <br />
-                    <span style={{ color: '#00ff00' }}>
-                      Simulado: {test.data.finalResistance.toFixed(0)} MΩ
-                    </span>
-                  </div>
-                )}
-                {test.id === 'schering' && (
-                  <div style={{ fontSize: '0.8rem', marginTop: '5px', color: '#ffd700' }}>
-                    <strong>Relatório:</strong> 0.45%
-                    <br />
-                    <span style={{ color: '#00ff00' }}>
-                      Simulado: {(test.data.finalTanDelta * 100).toFixed(3)}%
-                    </span>
-                  </div>
-                )}
-                {test.id === 'partial-discharge' && (
-                  <div style={{ fontSize: '0.8rem', marginTop: '5px', color: '#ffd700' }}>
-                    <strong>Relatório:</strong> 45 pC
-                    <br />
-                    <span style={{ color: '#00ff00' }}>
-                      Simulado: {test.data.finalDischargeLevel.toFixed(0)} pC
-                    </span>
-                  </div>
-                )}
               </div>
             ))}
           </div>
 
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.3)',
-            borderRadius: '10px',
-            padding: '20px',
-            marginBottom: '30px'
-          }}>
-            <h4 style={{ color: '#ffd700', marginBottom: '15px' }}>
-              📊 Valores de Referência do Relatório D00001F.pdf
+          <div className="reference-section">
+            <h4 style={{ color: '#38bdf8', marginBottom: '20px', fontSize: '0.85rem', textTransform: 'uppercase' }}>
+              Parâmetros de Referência (ID: D00001F)
             </h4>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-              gap: '15px',
-              color: 'rgba(255,255,255,0.9)'
-            }}>
-              <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '5px' }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Microhmímetro</div>
-                <div style={{ fontSize: '0.8rem' }}>0.065164 Ω</div>
-                <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>10A @ 0.65164V</div>
+            <div className="reference-grid">
+              <div className="reference-item">
+                <div className="reference-label">Resistência</div>
+                <div className="reference-value">0.065164 Ω</div>
+                <div style={{ fontSize: '0.65rem', color: '#475569' }}>10A CONT.</div>
               </div>
-              <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '5px' }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Megôhmetro</div>
-                <div style={{ fontSize: '0.8rem' }}>2430 MΩ</div>
-                <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>30min @ 5kV</div>
+              <div className="reference-item">
+                <div className="reference-label">Isolação</div>
+                <div className="reference-value">2430 MΩ</div>
+                <div style={{ fontSize: '0.65rem', color: '#475569' }}>5.0 kV DC</div>
               </div>
-              <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '5px' }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Tangente Delta</div>
-                <div style={{ fontSize: '0.8rem' }}>0.45%</div>
-                <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>10kV @ 2850pF</div>
+              <div className="reference-item">
+                <div className="reference-label">Tan Delta</div>
+                <div className="reference-value">0.45 %</div>
+                <div style={{ fontSize: '0.65rem', color: '#475569' }}>60 Hz Un</div>
               </div>
-              <div style={{ background: 'rgba(255,255,255,0.1)', padding: '10px', borderRadius: '5px' }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 'bold' }}>Descarga Parcial</div>
-                <div style={{ fontSize: '0.8rem' }}>45 pC</div>
-                <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>1250 pulsos</div>
+              <div className="reference-item">
+                <div className="reference-label">D. Parcial</div>
+                <div className="reference-value">45 pC</div>
+                <div style={{ fontSize: '0.65rem', color: '#475569' }}>IEC 60270</div>
               </div>
-            </div>
-          </div>
-
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.3)',
-            borderRadius: '10px',
-            padding: '20px',
-            marginBottom: '30px'
-          }}>
-            <h4 style={{ color: 'white', marginBottom: '15px' }}>
-              Equipamento Testado
-            </h4>
-            <div style={{ color: 'rgba(255,255,255,0.9)' }}>
-              <p><strong>Tipo:</strong> Gerador Síncrono Brushless</p>
-              <p><strong>Potência:</strong> 1750 kW</p>
-              <p><strong>Tensão:</strong> 13200 V</p>
-              <p><strong>Fabricante:</strong> WEG</p>
-              <p><strong>Modelo:</strong> RER</p>
-              <p><strong>Frequência:</strong> 60 Hz</p>
-            </div>
-          </div>
-
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.3)',
-            borderRadius: '10px',
-            padding: '20px',
-            marginBottom: '30px'
-          }}>
-            <h4 style={{ color: 'white', marginBottom: '15px' }}>
-              Status do Envio
-            </h4>
-            <div style={{
-              color: '#00ff00',
-              fontSize: '1.1rem',
-              fontWeight: 'bold'
-            }}>
-              ✓ Dados enviados com sucesso para a DAIMER
-            </div>
-            <div style={{
-              color: 'rgba(255,255,255,0.8)',
-              marginTop: '10px',
-              fontSize: '0.9rem'
-            }}>
-              Todos os ensaios foram processados e integrados ao sistema
             </div>
           </div>
         </div>
 
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          gap: '20px',
-          marginTop: '30px'
-        }}>
-          <button
-            className="btn btn-success"
-            onClick={downloadReport}
-            style={{
-              fontSize: '1.2rem',
-              padding: '15px 30px',
-              background: 'linear-gradient(45deg, #28a745, #20c997)',
-              border: 'none',
-              borderRadius: '8px',
-              color: 'white',
-              cursor: 'pointer',
-              boxShadow: '0 4px 15px rgba(40, 167, 69, 0.3)'
-            }}
-          >
-            📋 Abrir Relatório do PDF (D00001F.pdf)
-          </button>
+        <div className="equipment-info-panel" style={{ background: '#020617', padding: '24px', borderRadius: '8px', border: '1px solid #1e293b', margin: '20px 0' }}>
+            <h4 style={{ color: '#38bdf8', fontSize: '0.85rem', textTransform: 'uppercase', marginBottom: '16px' }}>Especificações do Ativo</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '15px', color: '#94a3b8', fontSize: '0.9rem' }}>
+              <div><strong>Ativo:</strong> Gerador Síncrono</div>
+              <div><strong>Potência:</strong> 1750 kW</div>
+              <div><strong>Tensão:</strong> 13.2 kV</div>
+              <div><strong>Fabricante:</strong> WEG</div>
+            </div>
+        </div>
 
-          <button
-            className="btn btn-secondary"
-            onClick={onNewSimulation}
-            style={{
-              fontSize: '1.2rem',
-              padding: '15px 30px',
-              background: 'rgba(108, 117, 125, 0.8)',
-              border: 'none',
-              borderRadius: '8px',
-              color: 'white',
-              cursor: 'pointer'
-            }}
-          >
-            Nova Simulação
+        <div style={{ display: 'flex', gap: '15px', marginTop: '40px' }}>
+          <button className="btn btn-primary" onClick={downloadReport} style={{ flex: 1, padding: '15px' }}>
+             GERAR RELATÓRIO PDF
+          </button>
+          <button className="btn btn-secondary" onClick={onNewSimulation} style={{ flex: 1, padding: '15px' }}>
+            NOVA SIMULAÇÃO
           </button>
         </div>
 
-        <div style={{
-          marginTop: '30px',
-          textAlign: 'center',
-          color: 'rgba(255,255,255,0.6)',
-          fontSize: '0.9rem'
-        }}>
-          <p>🎯 Simulação baseada nos valores reais do relatório D00001F.pdf</p>
-          <p>Plataforma DAIMER - Diagnose Avançada do Isolamento de Máquinas Elétricas Rotativas</p>
-        </div>
+        <footer style={{ marginTop: '40px', textAlign: 'center', color: '#475569', fontSize: '0.8rem' }}>
+          <p>Diagnose Avançada do Isolamento de Máquinas Elétricas Rotativas</p>
+          <p>© 2026 DAIMER - Automação de Ensaios Elétricos</p>
+        </footer>
       </div>
     </div>
   );

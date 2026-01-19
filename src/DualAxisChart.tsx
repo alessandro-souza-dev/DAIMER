@@ -443,7 +443,6 @@ const DualAxisChart: React.FC<DualAxisChartProps> = ({
         }
     } else {
         // Labels existentes (categoria)
-        let lastLabel = '';
         displayLabels.forEach((label, index) => {
            const shouldDraw = (index % labelStep === 0 || index === displayLabels.length - 1);
            if (shouldDraw) {
